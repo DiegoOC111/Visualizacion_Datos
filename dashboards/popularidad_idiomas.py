@@ -8,6 +8,7 @@ def cargar_datos(tipo_bd):
         return pd.read_csv("Datos/peliculas.csv")
     else:
         return pd.read_csv("Datos/series.csv")
+
 def obtener_mas_famoso_mediana(df, columna, min_apariciones=5):
     df_temp = df.dropna(subset=[columna, 'popularity', 'title']).copy()
     df_temp[columna] = df_temp[columna].astype(str).str.split(',')
@@ -19,19 +20,16 @@ def obtener_mas_famoso_mediana(df, columna, min_apariciones=5):
     if df_temp.empty:
         return "No hay datos registrados"
         
-    # Agrupamos calculando tanto la mediana como la cantidad de producciones
     agrupado = df_temp.groupby(columna).agg(
         mediana_popularidad=('popularity', 'median'),
         conteo=('title', 'count')
     ).reset_index()
     
-    # Filtramos a los que tengan muy pocas apariciones (One-Hit Wonders)
     agrupado = agrupado[agrupado['conteo'] >= min_apariciones]
     
     if agrupado.empty:
         return "No hay datos con suficientes apariciones"
         
-    # Ordenamos y sacamos el top 1
     top_1 = agrupado.sort_values(by='mediana_popularidad', ascending=False).head(1)[columna].values[0]
     
     return top_1
@@ -46,13 +44,16 @@ def popup_detalles_idioma(idioma, df_actual):
         st.warning("No hay datos para este idioma.")
         return
 
-    # Se reemplaza la lista completa por un contador de producciones únicas
+    # --- NUEVO: Cálculo del porcentaje del total ---
     cantidad_producciones = df_idioma['title'].nunique()
-    st.info(f"**Cantidad de producciones encontradas:** {cantidad_producciones}")
+    total_bd = df_actual['title'].nunique()
+    porcentaje_total = (cantidad_producciones / total_bd) * 100
+    
+    # Mostramos cantidad y porcentaje
+    st.info(f"**Cantidad de producciones:** {cantidad_producciones:,} ({porcentaje_total:.2f}% del catálogo total)")
         
     st.write("")
     
-    # Cálculos de popularidad basados en la mediana
     if not df_idioma.dropna(subset=['title', 'popularity']).empty:
         agrupado_titulos = df_idioma.groupby('title')['popularity'].median().reset_index()
         titulo_top = agrupado_titulos.sort_values(by='popularity', ascending=False).head(1)['title'].values[0]
@@ -101,20 +102,23 @@ def mostrar():
         st.warning("Selecciona al menos un idioma para visualizar la gráfica.")
         return
 
-    # 1. Filtrar y calcular la mediana y el conteo (volumen de datos)
+    # 1. Filtrar y calcular
     df_filtrado = df[df['language'].isin(idiomas_seleccionados)]
     agrupado_idiomas = df_filtrado.groupby('language').agg(
         mediana_popularidad=('popularity', 'median'),
         conteo_producciones=('title', 'count')
     ).reset_index()
 
-    # 2. Aplicar la fórmula del Promedio Bayesiano
-    # C = Mediana global de toda la muestra actual
+    # --- NUEVO: Agregamos el porcentaje de participación en el gráfico ---
+    total_seleccionados = agrupado_idiomas['conteo_producciones'].sum()
+    agrupado_idiomas['porcentaje_comparacion'] = (agrupado_idiomas['conteo_producciones'] / total_seleccionados) * 100
+    # Damos formato al porcentaje para que se vea bonito en el tooltip
+    agrupado_idiomas['% en gráfica'] = agrupado_idiomas['porcentaje_comparacion'].apply(lambda x: f"{x:.2f}%")
+
+    # 2. Promedio Bayesiano
     C = df_filtrado['popularity'].median()
-    # m = Umbral mínimo de confianza (usaremos el percentil 25 del volumen de datos)
     m = agrupado_idiomas['conteo_producciones'].quantile(0.25)
 
-    # Fórmula: (v / (v+m)) * R + (m / (v+m)) * C
     agrupado_idiomas['popularidad_ajustada'] = (
         (agrupado_idiomas['conteo_producciones'] / (agrupado_idiomas['conteo_producciones'] + m)) * agrupado_idiomas['mediana_popularidad'] +
         (m / (agrupado_idiomas['conteo_producciones'] + m)) * C
@@ -122,12 +126,12 @@ def mostrar():
 
     agrupado_idiomas = agrupado_idiomas.sort_values(by='popularidad_ajustada', ascending=False)
 
-    # 3. Configuración del gráfico reflejando el ajuste
+    # 3. Configuración del gráfico
     fig = px.bar(
         agrupado_idiomas,
         x='language',
         y='popularidad_ajustada',
-        color='conteo_producciones', # El color ahora te mostrará visualmente el peso de la población
+        color='conteo_producciones',
         color_continuous_scale='Purp',
         labels={
             'language': 'Idioma', 
@@ -135,7 +139,8 @@ def mostrar():
             'conteo_producciones': 'Volumen de Datos'
         },
         title="Popularidad por Idioma (Ajuste Bayesiano)",
-        hover_data={'mediana_popularidad': True} # Muestra la mediana original al pasar el mouse
+        # --- NUEVO: Mostramos el porcentaje en el tooltip del gráfico ---
+        hover_data={'mediana_popularidad': True, '% en gráfica': True} 
     )
     
     fig.update_layout(
@@ -146,11 +151,10 @@ def mostrar():
     )
 
     st.markdown("---")
-    # Control de estado de sesión para el clic en la gráfica
+    
     if "estado_idioma" not in st.session_state:
         st.session_state.estado_idioma = None
 
-    # Gráfico interactivo con st.plotly_chart
     event_idiomas = st.plotly_chart(
         fig,
         use_container_width=True,
@@ -159,7 +163,6 @@ def mostrar():
         key="grafico_idiomas_interactivo"
     )
 
-    # Lógica de detección de nuevo clic
     sel_idioma = event_idiomas.selection["points"][0]["x"] if event_idiomas and event_idiomas.selection.get("points") else None
     nuevo_idioma = sel_idioma if sel_idioma != st.session_state.estado_idioma else None
     st.session_state.estado_idioma = sel_idioma

@@ -15,21 +15,30 @@ def top_por_popularidad_por_idioma(df, columna_objetivo, columna_idioma=None, id
         columnas.append(columna_idioma)
     df_temp = df[columnas].dropna(subset=[columna_objetivo, 'title']).copy()
     df_temp['title'] = df_temp['title'].str.strip()
+    
     if columna_idioma and idiomas_permitidos:
         idiomas_limpios = [idioma.lower().strip() for idioma in idiomas_permitidos]
         patron_regex = '|'.join([rf"\b{idioma}\b" for idioma in idiomas_limpios])
         df_temp = df_temp[df_temp[columna_idioma].str.strip().str.lower().str.contains(patron_regex, regex=True, na=False)]
+        
     df_temp = df_temp[df_temp[columna_objetivo].str.strip().str.lower() != 'unknown']
     df_temp[columna_objetivo] = df_temp[columna_objetivo].str.split(',')
     df_exploded = df_temp.explode(columna_objetivo)
     df_exploded[columna_objetivo] = df_exploded[columna_objetivo].str.strip()
     df_exploded = df_exploded[df_exploded[columna_objetivo].str.lower() != 'unknown']
     df_exploded = df_exploded.drop_duplicates(subset=[columna_objetivo, 'title'])
+    
     agrupado = df_exploded.groupby(columna_objetivo).agg(
         mediana_popularidad=('popularity', 'median'),
         cantidad_apariciones=('title', 'count')
     )
     agrupado = agrupado[agrupado['cantidad_apariciones'] >= min_apariciones]
+    
+    # NUEVO: Calculamos porcentaje de participación para el tooltip
+    total_apariciones = agrupado['cantidad_apariciones'].sum()
+    agrupado['porcentaje_total'] = (agrupado['cantidad_apariciones'] / total_apariciones) * 100
+    agrupado['% Participación'] = agrupado['porcentaje_total'].apply(lambda x: f"{x:.2f}%")
+    
     return agrupado.sort_values(by='mediana_popularidad', ascending=False).head(top_n)
 
 def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="Tealgrn"):
@@ -43,9 +52,11 @@ def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="
         color_continuous_scale=paleta_color,
         labels={
             columna_nombre: columna_nombre.capitalize(),
-            'mediana_popularidad': 'Popularidad Mediana'
+            'mediana_popularidad': 'Pop. Mediana',
+            'cantidad_apariciones': 'Obras'
         },
-        title=titulo_grafico
+        title=titulo_grafico,
+        hover_data={'cantidad_apariciones': True, '% Participación': True} # NUEVO: Tooltip enriquecido
     )
     
     fig.update_layout(
@@ -56,9 +67,11 @@ def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="
         clickmode='event+select'
     )
     
+    # Mejora visual: Agregamos el valor encima de las barras
+    fig.update_traces(texttemplate='%{y:.1f}', textposition='outside')
+    
     return fig
 
-# Definimos la función del pop-up modal
 @st.dialog("Mini-Resumen", width="large")
 def popup_detalles(seleccion, df_actual):
     st.markdown(f"### 👤 {seleccion}")
@@ -74,7 +87,6 @@ def popup_detalles(seleccion, df_actual):
     if not df_persona.empty:
         titulos_lista = ", ".join(df_persona['title'].astype(str).tolist())
         
-        # Agrupamos la lista en un "expander" para que se vea más ordenado
         with st.expander(f"🎬 Producciones encontradas ({len(df_persona)})", expanded=True):
             st.write(titulos_lista)
         
@@ -83,7 +95,6 @@ def popup_detalles(seleccion, df_actual):
         mas_popular = df_persona.loc[df_persona['popularity'].idxmax()]
         menos_popular = df_persona.loc[df_persona['popularity'].idxmin()]
         
-        # Lógica de fecha más reciente
         columnas_fecha_posibles = ['release_date', 'first_air_date', 'year', 'date_added']
         col_fecha_usada = next((col for col in columnas_fecha_posibles if col in df_persona.columns), None)
         
@@ -95,11 +106,10 @@ def popup_detalles(seleccion, df_actual):
             fecha_str = mas_reciente[col_fecha_usada].strftime('%Y') if pd.notnull(mas_reciente[col_fecha_usada]) else "N/A"
             mas_reciente_titulo = mas_reciente['title']
 
-        # Usamos columnas y markdown en lugar de st.metric para evitar recortes
         c1, c2, c3 = st.columns(3)
         
         with c1:
-            st.markdown(" **Más Popular**")
+            st.markdown("**Más Popular**")
             st.markdown(f"##### {mas_popular['title']}")
             st.success(f"↑ {mas_popular['popularity']:.1f} pop")
             
@@ -111,7 +121,7 @@ def popup_detalles(seleccion, df_actual):
         with c3:
             st.markdown("**Más Reciente**")
             st.markdown(f"##### {mas_reciente_titulo}")
-            st.info(f" Año: {fecha_str}")
+            st.info(f"Año: {fecha_str}")
 
 def mostrar():
     st.title("🎬 Dashboard de Popularidad: Actores y Directores")
@@ -124,7 +134,7 @@ def mostrar():
         st.error(f"No se encontró el archivo respectivo para {tipo_bd}.")
         st.stop()
 
-    st.sidebar.header(" Filtros de Búsqueda")
+    st.sidebar.header("Filtros de Búsqueda")
     
     if 'language' in df_actual.columns:
         lista_idiomas = sorted(df_actual['language'].dropna().astype(str).str.strip().unique())
@@ -141,7 +151,6 @@ def mostrar():
 
     st.markdown("---")
 
-    # Inicializamos variables de estado para evitar el "choque" de pop-ups
     if "estado_actores" not in st.session_state:
         st.session_state.estado_actores = None
     if "estado_directores" not in st.session_state:
@@ -156,19 +165,19 @@ def mostrar():
         event_directores = None
 
         with col1:
-            st.subheader(" Top 5 Actores")
+            st.subheader("Top 5 Actores")
             if 'cast' in df_actual.columns:
                 top_actores = top_por_popularidad_por_idioma(
                     df_actual, 'cast', 'language', idiomas_seleccionados, min_apariciones, 5
                 )
                 if not top_actores.empty:
-                    st.dataframe(top_actores, use_container_width=True)
+                    # Ocultamos la columna técnica de porcentaje en el dataframe
+                    st.dataframe(top_actores.drop(columns=['porcentaje_total']), use_container_width=True)
                     
                     fig_actores = crear_grafico_degrade(
                         top_actores, 'cast', 'Popularidad de Actores', paleta_color='Tealgrn'
                     )
                     
-                    # IMPORTANTE: Se añade key="grafico_actores" y selection_mode
                     event_actores = st.plotly_chart(
                         fig_actores, 
                         use_container_width=True, 
@@ -182,19 +191,19 @@ def mostrar():
                 st.error("No existe la columna 'cast'.")
 
         with col2:
-            st.subheader(" Top 5 Directores")
+            st.subheader("Top 5 Directores")
             if 'director' in df_actual.columns:
                 top_directores = top_por_popularidad_por_idioma(
                     df_actual, 'director', 'language', idiomas_seleccionados, min_apariciones, 5
                 )
                 if not top_directores.empty:
-                    st.dataframe(top_directores, use_container_width=True)
+                    # Ocultamos la columna técnica de porcentaje en el dataframe
+                    st.dataframe(top_directores.drop(columns=['porcentaje_total']), use_container_width=True)
                     
                     fig_directores = crear_grafico_degrade(
                         top_directores, 'director', 'Popularidad de Directores', paleta_color='Sunset'
                     )
                     
-                    # IMPORTANTE: Se añade key="grafico_directores" y selection_mode
                     event_directores = st.plotly_chart(
                         fig_directores, 
                         use_container_width=True, 
@@ -206,24 +215,16 @@ def mostrar():
                     st.info("Sin resultados.")
             else:
                 st.error("No existe la columna 'director'.")
-
-        # ==========================================
-        # LÓGICA DE CONTROL DE POP-UPS (EVITA ERRORES)
-        # ==========================================
         
-        # 1. Extraemos la selección actual (si existe) de cada gráfico
         sel_actor = event_actores.selection["points"][0]["x"] if event_actores and event_actores.selection.get("points") else None
         sel_director = event_directores.selection["points"][0]["x"] if event_directores and event_directores.selection.get("points") else None
 
-        # 2. Comparamos con el estado anterior para detectar si hubo un clic NUEVO
         nuevo_actor = sel_actor if sel_actor != st.session_state.estado_actores else None
         nuevo_director = sel_director if sel_director != st.session_state.estado_directores else None
 
-        # 3. Guardamos el estado actual para la próxima recarga
         st.session_state.estado_actores = sel_actor
         st.session_state.estado_directores = sel_director
 
-        # 4. Solo abrimos el pop-up para el elemento que acaba de ser clicado
         if nuevo_actor:
             popup_detalles(nuevo_actor, df_actual)
         elif nuevo_director:
