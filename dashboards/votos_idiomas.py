@@ -16,7 +16,6 @@ def crear_pie_chart_idiomas_votos(df, titulo):
     df_lang = df.dropna(subset=['language', 'vote_count']).copy()
     df_lang['language'] = df_lang['language'].astype(str).str.strip()
     
-    # Sumamos los votos por idioma
     df_counts = df_lang.groupby('language')['vote_count'].sum().reset_index()
     df_counts.columns = ['language', 'total_votos']
     df_counts = df_counts.sort_values(by='total_votos', ascending=False)
@@ -41,6 +40,37 @@ def crear_pie_chart_idiomas_votos(df, titulo):
     fig.update_traces(textposition='inside', textinfo='percent+label')
     fig.update_layout(margin=dict(l=10, r=10, t=40, b=10))
     return fig
+
+def crear_grafico_temporal_votos_idiomas(df, idiomas_top):
+    if 'release_year' not in df.columns or 'vote_count' not in df.columns or 'language' not in df.columns:
+        return None, pd.DataFrame()
+        
+    df_temp = df.dropna(subset=['language', 'vote_count', 'release_year']).copy()
+    df_temp['language'] = df_temp['language'].astype(str).str.strip()
+    
+    df_temp = df_temp[df_temp['language'].isin(idiomas_top)]
+    
+    df_agrupado = df_temp.groupby(['release_year', 'language'])['vote_count'].mean().reset_index()
+    df_agrupado.rename(columns={'vote_count': 'Promedio de Votos', 'release_year': 'Año'}, inplace=True)
+    
+    fig = px.line(
+        df_agrupado,
+        x='Año',
+        y='Promedio de Votos',
+        color='language',
+        title="Evolucion Temporal: Promedio de Votos por Idioma",
+        labels={'language': 'Idioma'},
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+        markers=True
+    )
+    
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=10, r=10, t=40, b=10),
+        hovermode="x unified"
+    )
+    
+    return fig, df_agrupado
 
 def obtener_mas_votado(df, columna, min_apariciones=2):
     df_temp = df.dropna(subset=[columna, 'vote_count', 'title']).copy()
@@ -113,41 +143,21 @@ def mostrar():
     except FileNotFoundError:
         st.error("No se encontraron los archivos de datos.")
         st.stop()
+        
+    # --- FILTRO GLOBAL ---
+    if 'filtro_anios' in st.session_state:
+        min_y, max_y = st.session_state['filtro_anios']
+        
+        if 'release_year' in df_pelis.columns:
+            df_pelis['release_year'] = pd.to_numeric(df_pelis['release_year'], errors='coerce')
+            df_pelis = df_pelis[(df_pelis['release_year'] >= min_y) & (df_pelis['release_year'] <= max_y)]
+            
+        if 'release_year' in df_series.columns:
+            df_series['release_year'] = pd.to_numeric(df_series['release_year'], errors='coerce')
+            df_series = df_series[(df_series['release_year'] >= min_y) & (df_series['release_year'] <= max_y)]
 
-    # --- SECCION DE GRAFICOS CIRCULARES ---
-    st.subheader("Distribucion General de Votos por Idioma")
-    col_pie1, col_pie2 = st.columns(2)
-    
-    with col_pie1:
-        fig_pie_pelis = crear_pie_chart_idiomas_votos(df_pelis, "Votos por Idioma en Peliculas")
-        if fig_pie_pelis:
-            st.plotly_chart(fig_pie_pelis, use_container_width=True, key="pie_votos_idioma_pelis")
-            if st.button("Agregar Grafico de Peliculas al Informe", key="btn_add_pie_votos_idioma_pelis"):
-                st.session_state['cuaderno_items']['pie_votos_idioma_pelis'] = {
-                    'tipo': 'grafico',
-                    'titulo': 'Distribucion de Votos por Idioma - Peliculas',
-                    'figura': fig_pie_pelis,
-                    'contenido': "Grafico circular de interacciones de los 4 idiomas principales en Peliculas."
-                }
-                st.toast("Grafico agregado al informe")
-
-    with col_pie2:
-        fig_pie_series = crear_pie_chart_idiomas_votos(df_series, "Votos por Idioma en Series")
-        if fig_pie_series:
-            st.plotly_chart(fig_pie_series, use_container_width=True, key="pie_votos_idioma_series")
-            if st.button("Agregar Grafico de Series al Informe", key="btn_add_pie_votos_idioma_series"):
-                st.session_state['cuaderno_items']['pie_votos_idioma_series'] = {
-                    'tipo': 'grafico',
-                    'titulo': 'Distribucion de Votos por Idioma - Series',
-                    'figura': fig_pie_series,
-                    'contenido': "Grafico circular de interacciones de los 4 idiomas principales en Series."
-                }
-                st.toast("Grafico agregado al informe")
-
-    st.markdown("---")
-
-    # --- SECCION DE BARRAS INTERACTIVO ---
-    st.subheader("Analisis Detallado de Interacciones")
+    # --- CONTROLES DE ANALISIS DETALLADO ---
+    st.markdown("### Controles de Analisis")
     tipo_bd = st.selectbox("Selecciona la base de datos:", ["Películas", "Series"], key="bd_idiomas_int")
 
     df = df_pelis if tipo_bd == "Películas" else df_series
@@ -156,7 +166,6 @@ def mostrar():
         st.error("Faltan columnas necesarias (language o vote_count).")
         st.stop()
 
-    # Calculamos el total de votos del catalogo ANTES de filtrar
     total_votos_catalogo = df['vote_count'].sum() if 'vote_count' in df.columns else 1
 
     lista_idiomas = sorted(df['language'].dropna().astype(str).str.strip().unique())
@@ -168,86 +177,146 @@ def mostrar():
     )
     
     if not idiomas_seleccionados:
-        st.warning("Selecciona al menos un idioma para visualizar la grafica.")
+        st.warning("Selecciona al menos un idioma para visualizar las graficas detalladas.")
         return
 
-    df_filtrado = df[df['language'].isin(idiomas_seleccionados)]
-    agrupado_idiomas = df_filtrado.groupby('language').agg(
-        total_votos=('vote_count', 'sum'),
-        conteo_producciones=('title', 'count')
-    ).reset_index()
+    st.markdown("---")
 
-    # Calculamos porcentaje basado en el TOTAL del catalogo general
-    agrupado_idiomas['porcentaje_total'] = (agrupado_idiomas['total_votos'] / total_votos_catalogo) * 100
-    agrupado_idiomas['% del Total'] = agrupado_idiomas['porcentaje_total'].apply(lambda x: f"{x:.2f}%")
+    # --- SEGMENTO 1: GRAFICOS CIRCULARES ---
+    with st.expander("1. Distribucion General de Votos (Circulares)", expanded=False):
+        col_pie1, col_pie2 = st.columns(2)
+        
+        with col_pie1:
+            fig_pie_pelis = crear_pie_chart_idiomas_votos(df_pelis, "Votos por Idioma en Peliculas")
+            if fig_pie_pelis:
+                st.plotly_chart(fig_pie_pelis, use_container_width=True, key="pie_votos_idioma_pelis")
+                if st.button("Agregar Grafico (Peliculas) al Informe", key="btn_add_pie_votos_idioma_pelis"):
+                    rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                    st.session_state['cuaderno_items'][f'pie_votos_idioma_pelis-{rango_actual}'] = {
+                        'tipo': 'grafico',
+                        'titulo': 'Distribucion de Votos por Idioma - Peliculas',
+                        'figura': fig_pie_pelis,
+                        'contenido': "Grafico circular de interacciones de los 3 idiomas principales en Peliculas.",
+                        'rango_anios': rango_actual
+                    }
+                    st.toast("Grafico agregado al informe")
 
-    agrupado_idiomas = agrupado_idiomas.sort_values(by='total_votos', ascending=False)
+        with col_pie2:
+            fig_pie_series = crear_pie_chart_idiomas_votos(df_series, "Votos por Idioma en Series")
+            if fig_pie_series:
+                st.plotly_chart(fig_pie_series, use_container_width=True, key="pie_votos_idioma_series")
+                if st.button("Agregar Grafico (Series) al Informe", key="btn_add_pie_votos_idioma_series"):
+                    rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                    st.session_state['cuaderno_items'][f'pie_votos_idioma_series-{rango_actual}'] = {
+                        'tipo': 'grafico',
+                        'titulo': 'Distribucion de Votos por Idioma - Series',
+                        'figura': fig_pie_series,
+                        'contenido': "Grafico circular de interacciones de los 3 idiomas principales en Series.",
+                        'rango_anios': rango_actual
+                    }
+                    st.toast("Grafico agregado al informe")
 
-    fig = px.bar(
-        agrupado_idiomas,
-        x='language',
-        y='total_votos',
-        color='total_votos',
-        color_continuous_scale='Purp',
-        labels={
-            'language': 'Idioma', 
-            'total_votos': 'Total de Votos',
-            'conteo_producciones': 'Volumen de Datos'
-        },
-        title="Interacciones por Idioma",
-        hover_data={'conteo_producciones': True, '% del Total': True} 
-    )
-    
-    fig.update_layout(
-        xaxis={'categoryorder': 'total descending'},
-        template='plotly_white',
-        margin=dict(l=10, r=10, t=40, b=10),
-        clickmode='event+select',
-        coloraxis_showscale=False
-    )
-    
-    fig.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
+    # --- SEGMENTO 2: GRAFICO DE BARRAS ---
+    with st.expander("2. Analisis Detallado de Interacciones (Barras)", expanded=True):
+        df_filtrado = df[df['language'].isin(idiomas_seleccionados)]
+        agrupado_idiomas = df_filtrado.groupby('language').agg(
+            total_votos=('vote_count', 'sum'),
+            conteo_producciones=('title', 'count')
+        ).reset_index()
 
+        agrupado_idiomas['porcentaje_total'] = (agrupado_idiomas['total_votos'] / total_votos_catalogo) * 100
+        agrupado_idiomas['% del Total'] = agrupado_idiomas['porcentaje_total'].apply(lambda x: f"{x:.2f}%")
+        agrupado_idiomas = agrupado_idiomas.sort_values(by='total_votos', ascending=False)
+
+        fig = px.bar(
+            agrupado_idiomas,
+            x='language',
+            y='total_votos',
+            color='total_votos',
+            color_continuous_scale='Purp',
+            labels={'language': 'Idioma', 'total_votos': 'Total de Votos', 'conteo_producciones': 'Volumen de Datos'},
+            title="Interacciones por Idioma",
+            hover_data={'conteo_producciones': True, '% del Total': True} 
+        )
+        
+        fig.update_layout(
+            xaxis={'categoryorder': 'total descending'},
+            template='plotly_white',
+            margin=dict(l=10, r=10, t=40, b=10),
+            clickmode='event+select',
+            coloraxis_showscale=False
+        )
+        fig.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
+
+        event_idiomas = st.plotly_chart(
+            fig,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="points",
+            key="grafico_idiomas_int_interactivo"
+        )
+        
+        if st.button("Agregar Grafico de Barras al Informe", key="btn_add_graf_idiomas_votos"):
+            rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+            st.session_state['cuaderno_items'][f'graf_idiomas_votos-{rango_actual}'] = {
+                'tipo': 'grafico',
+                'titulo': f'Interacciones Totales por Idioma ({tipo_bd})',
+                'figura': fig,
+                'contenido': "Grafico de barras exportado de Interacciones por Idioma",
+                'rango_anios': rango_actual
+            }
+            st.toast("Grafico agregado al informe")
+        
+        if st.toggle("Mostrar tabla de datos de barras", key="tgl_tabla_barras_idioma"):
+            df_idiomas_limpio = agrupado_idiomas.drop(columns=['porcentaje_total'])
+            st.dataframe(df_idiomas_limpio, use_container_width=True)
+            
+            if st.button("Agregar Tabla de Idiomas al Informe", key="btn_add_tabla_idiomas_votos"):
+                rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                st.session_state['cuaderno_items'][f'tabla_idiomas_votos-{rango_actual}'] = {
+                    'tipo': 'tabla',
+                    'titulo': f'Datos Interacciones por Idioma ({tipo_bd})',
+                    'contenido': df_idiomas_limpio,
+                    'rango_anios': rango_actual
+                }
+                st.toast("Tabla agregada al reporte")
+
+    # --- SEGMENTO 3: GRAFICO TEMPORAL ---
+    with st.expander("3. Evolucion de Votos Promedio (Lineas)", expanded=True):
+        fig_line, df_temp_agrupado = crear_grafico_temporal_votos_idiomas(df, idiomas_seleccionados)
+        
+        if fig_line is not None and not df_temp_agrupado.empty:
+            st.plotly_chart(fig_line, use_container_width=True, key="line_votos_temporal_idioma")
+            
+            if st.button("Agregar Grafico Temporal al Informe", key="btn_add_line_temporal_votos_idioma"):
+                rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                st.session_state['cuaderno_items'][f'line_temporal_votos_idioma-{rango_actual}'] = {
+                    'tipo': 'grafico',
+                    'titulo': f'Evolucion de Promedio de Votos por Idioma ({tipo_bd})',
+                    'figura': fig_line,
+                    'contenido': "Grafico de linea temporal mostrando el promedio de votos por año de los idiomas seleccionados.",
+                    'rango_anios': rango_actual
+                }
+                st.toast("Grafico agregado al informe")
+                
+            if st.toggle("Mostrar datos temporales", key="tgl_tabla_temporal_idioma"):
+                df_pivot = df_temp_agrupado.pivot(index='Año', columns='language', values='Promedio de Votos').reset_index().round(1)
+                df_pivot = df_pivot.fillna(0)
+                st.dataframe(df_pivot, use_container_width=True)
+                
+                if st.button("Agregar Tabla Temporal al Informe", key="btn_add_tabla_temporal_votos_idioma"):
+                    rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                    st.session_state['cuaderno_items'][f'tabla_temporal_votos_idioma-{rango_actual}'] = {
+                        'tipo': 'tabla',
+                        'titulo': f'Historico de Promedio de Votos por Idioma ({tipo_bd})',
+                        'contenido': df_pivot,
+                        'rango_anios': rango_actual
+                    }
+                    st.toast("Tabla agregada al reporte")
+
+    # Dialogo de seleccion
     if "estado_idioma_int" not in st.session_state:
         st.session_state.estado_idioma_int = None
-
-    # Renderizamos el GRAFICO INTERACTIVO
-    event_idiomas = st.plotly_chart(
-        fig,
-        use_container_width=True,
-        on_select="rerun",
-        selection_mode="points",
-        key="grafico_idiomas_int_interactivo"
-    )
-    
-    # BOTON PARA AGREGAR GRAFICO DE BARRAS AL INFORME
-    if st.button("Agregar Grafico de Barras al Informe", key="btn_add_graf_idiomas_votos"):
-        st.session_state['cuaderno_items']['graf_idiomas_votos'] = {
-            'tipo': 'grafico',
-            'titulo': f'Interacciones Totales por Idioma ({tipo_bd})',
-            'figura': fig,
-            'contenido': "Grafico de barras exportado de Interacciones por Idioma"
-        }
-        st.toast("Grafico agregado al informe")
-    
-    # TABLA DE DATOS EN DESPLEGABLE
-    with st.expander("Ver tabla de datos", expanded=False):
-        df_idiomas_limpio = agrupado_idiomas.drop(columns=['porcentaje_total'])
-        st.dataframe(df_idiomas_limpio, use_container_width=True)
-        
-        if st.button("Agregar Tabla de Idiomas al Informe", key="btn_add_tabla_idiomas_votos"):
-            contenido_texto = []
-            for _, row in df_idiomas_limpio.iterrows():
-                contenido_texto.append(f"Idioma {row['language']}: Total Votos = {row['total_votos']:,.0f}, Obras = {row['conteo_producciones']}, Representa = {row['% del Total']}")
-                
-            st.session_state['cuaderno_items']['tabla_idiomas_votos'] = {
-                'tipo': 'tabla',
-                'titulo': f'Datos Interacciones por Idioma ({tipo_bd})',
-                'contenido': df_idiomas_limpio
-            }
-            st.toast("Tabla agregada al reporte")
-
-    st.markdown("---")
 
     sel_idioma = event_idiomas.selection["points"][0]["x"] if event_idiomas and event_idiomas.selection.get("points") else None
     nuevo_idioma = sel_idioma if sel_idioma != st.session_state.estado_idioma_int else None

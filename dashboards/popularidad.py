@@ -69,6 +69,41 @@ def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="
     
     return fig
 
+def crear_grafico_temporal_popularidad(df, columna_objetivo, talentos_top):
+    if 'release_year' not in df.columns or 'popularity' not in df.columns or columna_objetivo not in df.columns:
+        return None, pd.DataFrame()
+        
+    df_temp = df.dropna(subset=[columna_objetivo, 'popularity', 'release_year']).copy()
+    df_temp[columna_objetivo] = df_temp[columna_objetivo].astype(str).str.split(',')
+    df_temp = df_temp.explode(columna_objetivo)
+    df_temp[columna_objetivo] = df_temp[columna_objetivo].str.strip()
+    
+    df_temp = df_temp[df_temp[columna_objetivo].isin(talentos_top)]
+    
+    df_agrupado = df_temp.groupby(['release_year', columna_objetivo])['popularity'].mean().reset_index()
+    df_agrupado.rename(columns={'popularity': 'Promedio de Popularidad', 'release_year': 'Año'}, inplace=True)
+    
+    titulo = "Evolucion de Popularidad: Actores" if columna_objetivo == 'cast' else "Evolucion de Popularidad: Directores"
+    
+    fig = px.line(
+        df_agrupado,
+        x='Año',
+        y='Promedio de Popularidad',
+        color=columna_objetivo,
+        title=titulo,
+        labels={columna_objetivo: columna_objetivo.capitalize()},
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+        markers=True
+    )
+    
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=10, r=10, t=40, b=10),
+        hovermode="x unified"
+    )
+    
+    return fig, df_agrupado
+
 @st.dialog("Mini-Resumen", width="large")
 def popup_detalles(seleccion, df_actual):
     st.markdown(f"### {seleccion}")
@@ -131,20 +166,25 @@ def mostrar():
         st.error(f"No se encontro el archivo respectivo para {tipo_bd}.")
         st.stop()
 
-    st.sidebar.header("Filtros de Busqueda")
+    if 'filtro_anios' in st.session_state and 'release_year' in df_actual.columns:
+        df_actual['release_year'] = pd.to_numeric(df_actual['release_year'], errors='coerce')
+        min_y, max_y = st.session_state['filtro_anios']
+        df_actual = df_actual[(df_actual['release_year'] >= min_y) & (df_actual['release_year'] <= max_y)]
     
-    if 'language' in df_actual.columns:
-        lista_idiomas = sorted(df_actual['language'].dropna().astype(str).str.strip().unique())
-    else:
-        lista_idiomas = []
-
-    idiomas_seleccionados = st.sidebar.multiselect(
-        "Selecciona el/los idioma(s):",
-        options=lista_idiomas,
-        default=["en"] if "en" in lista_idiomas else None
-    )
-
-    min_apariciones = st.sidebar.slider("Apariciones minimas (Rango: 1 - 10):", min_value=1, max_value=10, value=8)
+    st.markdown("### Controles de Analisis")
+    
+    col_c1, col_c2 = st.columns(2)
+    
+    with col_c1:
+        lista_idiomas = sorted(df_actual['language'].dropna().astype(str).str.strip().unique()) if 'language' in df_actual.columns else []
+        idiomas_seleccionados = st.multiselect(
+            "Filtro por Idioma(s):",
+            options=lista_idiomas,
+            default=["en"] if "en" in lista_idiomas else None
+        )
+        
+    with col_c2:
+        min_apariciones = st.slider("Apariciones minimas en producciones:", min_value=1, max_value=10, value=8)
 
     st.markdown("---")
 
@@ -154,17 +194,9 @@ def mostrar():
         st.session_state.estado_directores = None
 
     if not idiomas_seleccionados:
-        st.warning("Por favor, selecciona al menos un idioma en la barra lateral para ver los resultados.")
+        st.warning("Por favor, selecciona al menos un idioma para ver los resultados.")
     else:
-        col1, col2 = st.columns(2)
-        
-        event_actores = None
-        event_directores = None
-        top_actores = pd.DataFrame()
-        top_directores = pd.DataFrame()
-
-        with col1:
-            st.subheader("Top 5 Actores")
+        with st.expander("1. Analisis de Popularidad: Actores", expanded=True):
             if 'cast' in df_actual.columns:
                 top_actores = top_por_popularidad_por_idioma(
                     df_actual, 'cast', 'language', idiomas_seleccionados, min_apariciones, 5
@@ -181,32 +213,68 @@ def mostrar():
                         key="grafico_actores"
                     )
                     
-                    if st.button("Agregar Grafico de Actores al Informe", key="btn_add_graf_actores"):
-                        st.session_state['cuaderno_items']['graf_actores_pop'] = {
+                    if st.button("Agregar Grafico (Barras) Actores al Informe", key="btn_add_graf_actores"):
+                        rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                        st.session_state['cuaderno_items'][f'graf_actores_pop-{rango_actual}'] = {
                             'tipo': 'grafico',
                             'titulo': f'Top 5 Actores por Popularidad ({tipo_bd})',
                             'figura': fig_actores,
-                            'contenido': "Grafico exportado de Top Actores"
+                            'contenido': "Grafico exportado de Top Actores",
+                            'rango_anios': rango_actual
                         }
                         st.toast("Grafico agregado al reporte")
+                        
+                    st.markdown("##### Evolucion Temporal")
+                    talentos_top_act = top_actores.index.tolist()
+                    fig_line_act, df_temp_act = crear_grafico_temporal_popularidad(df_actual, 'cast', talentos_top_act)
                     
-                    with st.expander("Ver tabla de datos", expanded=False):
+                    if fig_line_act is not None and not df_temp_act.empty:
+                        st.plotly_chart(fig_line_act, use_container_width=True, key="line_pop_actores")
+                        
+                        if st.button("Agregar Grafico (Lineas) Actores al Informe", key="btn_add_line_actores_pop"):
+                            rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                            st.session_state['cuaderno_items'][f'line_actores_pop-{rango_actual}'] = {
+                                'tipo': 'grafico',
+                                'titulo': f'Evolucion Popularidad: Actores ({tipo_bd})',
+                                'figura': fig_line_act,
+                                'contenido': "Evolucion promedio de popularidad por año para los top actores.",
+                                'rango_anios': rango_actual
+                            }
+                            st.toast("Grafico agregado al informe")
+                    
+                    if st.toggle("Mostrar tablas de datos (Actores)", key="tgl_tablas_actores_pop"):
+                        st.write("**Top Popularidad**")
                         df_actores_limpio = top_actores.drop(columns=['porcentaje_total'])
                         st.dataframe(df_actores_limpio, use_container_width=True)
-                        if st.button("Agregar Tabla Actores al Informe", key="btn_add_tabla_actores"):
-                             st.session_state['cuaderno_items']['tabla_actores_pop'] = {
+                        if st.button("Agregar Tabla Totales al Informe", key="btn_add_tabla_actores"):
+                             rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                             st.session_state['cuaderno_items'][f'tabla_actores_pop-{rango_actual}'] = {
                                 'tipo': 'tabla',
                                 'titulo': f'Datos Top 5 Actores por Popularidad ({tipo_bd})',
-                                'contenido': df_actores_limpio
+                                'contenido': df_actores_limpio,
+                                'rango_anios': rango_actual
                             }
                              st.toast("Tabla agregada al reporte")
+                             
+                        if not df_temp_act.empty:
+                            st.write("**Promedios Anuales**")
+                            df_pivot_act = df_temp_act.pivot(index='Año', columns='cast', values='Promedio de Popularidad').reset_index().round(1).fillna(0)
+                            st.dataframe(df_pivot_act, use_container_width=True)
+                            if st.button("Agregar Tabla Temporal al Informe", key="btn_add_tabla_temp_act_pop"):
+                                rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                                st.session_state['cuaderno_items'][f'tabla_temp_act_pop-{rango_actual}'] = {
+                                    'tipo': 'tabla',
+                                    'titulo': f'Historico Promedio Popularidad Actores ({tipo_bd})',
+                                    'contenido': df_pivot_act,
+                                    'rango_anios': rango_actual
+                                }
+                                st.toast("Tabla agregada al reporte")
                 else:
-                    st.info("Sin resultados.")
+                    st.info("Sin resultados de Actores para los filtros seleccionados.")
             else:
                 st.error("No existe la columna 'cast'.")
 
-        with col2:
-            st.subheader("Top 5 Directores")
+        with st.expander("2. Analisis de Popularidad: Directores", expanded=False):
             if 'director' in df_actual.columns:
                 top_directores = top_por_popularidad_por_idioma(
                     df_actual, 'director', 'language', idiomas_seleccionados, min_apariciones, 5
@@ -223,32 +291,75 @@ def mostrar():
                         key="grafico_directores"
                     )
                     
-                    if st.button("Agregar Grafico de Directores al Informe", key="btn_add_graf_directores"):
-                        st.session_state['cuaderno_items']['graf_directores_pop'] = {
+                    if st.button("Agregar Grafico (Barras) Directores al Informe", key="btn_add_graf_directores"):
+                        rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                        st.session_state['cuaderno_items'][f'graf_directores_pop-{rango_actual}'] = {
                             'tipo': 'grafico',
                             'titulo': f'Top 5 Directores por Popularidad ({tipo_bd})',
                             'figura': fig_directores,
-                            'contenido': "Grafico exportado de Top Directores"
+                            'contenido': "Grafico exportado de Top Directores",
+                            'rango_anios': rango_actual
                         }
                         st.toast("Grafico agregado al reporte")
+                        
+                    st.markdown("##### Evolucion Temporal")
+                    talentos_top_dir = top_directores.index.tolist()
+                    fig_line_dir, df_temp_dir = crear_grafico_temporal_popularidad(df_actual, 'director', talentos_top_dir)
                     
-                    with st.expander("Ver tabla de datos", expanded=False):
+                    if fig_line_dir is not None and not df_temp_dir.empty:
+                        st.plotly_chart(fig_line_dir, use_container_width=True, key="line_pop_directores")
+                        
+                        if st.button("Agregar Grafico (Lineas) Directores al Informe", key="btn_add_line_dir_pop"):
+                            rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                            st.session_state['cuaderno_items'][f'line_dir_pop-{rango_actual}'] = {
+                                'tipo': 'grafico',
+                                'titulo': f'Evolucion Popularidad: Directores ({tipo_bd})',
+                                'figura': fig_line_dir,
+                                'contenido': "Evolucion promedio de popularidad por año para los top directores.",
+                                'rango_anios': rango_actual
+                            }
+                            st.toast("Grafico agregado al informe")
+                    
+                    if st.toggle("Mostrar tablas de datos (Directores)", key="tgl_tablas_directores_pop"):
+                        st.write("**Top Popularidad**")
                         df_directores_limpio = top_directores.drop(columns=['porcentaje_total'])
                         st.dataframe(df_directores_limpio, use_container_width=True)
-                        if st.button("Agregar Tabla Directores al Informe", key="btn_add_tabla_directores"):
-                             st.session_state['cuaderno_items']['tabla_directores_pop'] = {
+                        if st.button("Agregar Tabla Totales al Informe", key="btn_add_tabla_directores"):
+                             rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                             st.session_state['cuaderno_items'][f'tabla_directores_pop-{rango_actual}'] = {
                                 'tipo': 'tabla',
                                 'titulo': f'Datos Top 5 Directores por Popularidad ({tipo_bd})',
-                                'contenido': df_directores_limpio
+                                'contenido': df_directores_limpio,
+                                'rango_anios': rango_actual
                             }
                              st.toast("Tabla agregada al reporte")
+                             
+                        if not df_temp_dir.empty:
+                            st.write("**Promedios Anuales**")
+                            df_pivot_dir = df_temp_dir.pivot(index='Año', columns='director', values='Promedio de Popularidad').reset_index().round(1).fillna(0)
+                            st.dataframe(df_pivot_dir, use_container_width=True)
+                            if st.button("Agregar Tabla Temporal al Informe", key="btn_add_tabla_temp_dir_pop"):
+                                rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                                st.session_state['cuaderno_items'][f'tabla_temp_dir_pop-{rango_actual}'] = {
+                                    'tipo': 'tabla',
+                                    'titulo': f'Historico Promedio Popularidad Directores ({tipo_bd})',
+                                    'contenido': df_pivot_dir,
+                                    'rango_anios': rango_actual
+                                }
+                                st.toast("Tabla agregada al reporte")
                 else:
-                    st.info("Sin resultados.")
+                    st.info("Sin resultados de Directores para los filtros seleccionados.")
             else:
                 st.error("No existe la columna 'director'.")
         
-        sel_actor = event_actores.selection["points"][0]["x"] if event_actores and event_actores.selection.get("points") else None
-        sel_director = event_directores.selection["points"][0]["x"] if event_directores and event_directores.selection.get("points") else None
+        sel_actor = None
+        sel_director = None
+        
+        if 'event_actores' in locals() and event_actores:
+            sel_actor = event_actores.selection["points"][0]["x"] if event_actores.selection.get("points") else None
+            
+        if 'event_directores' in locals() and event_directores:
+            sel_director = event_directores.selection["points"][0]["x"] if event_directores.selection.get("points") else None
 
         nuevo_actor = sel_actor if sel_actor != st.session_state.estado_actores else None
         nuevo_director = sel_director if sel_director != st.session_state.estado_directores else None

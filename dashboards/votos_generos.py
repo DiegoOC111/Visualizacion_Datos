@@ -19,7 +19,6 @@ def crear_pie_chart_generos_votos(df, titulo):
     df_gen['genres'] = df_gen['genres'].str.strip()
     df_gen = df_gen[df_gen['genres'].str.lower() != 'unknown']
     
-    # Sumamos los votos por género
     df_counts = df_gen.groupby('genres')['vote_count'].sum().reset_index()
     df_counts.columns = ['genres', 'total_votos']
     df_counts = df_counts.sort_values(by='total_votos', ascending=False)
@@ -44,6 +43,39 @@ def crear_pie_chart_generos_votos(df, titulo):
     fig.update_traces(textposition='inside', textinfo='percent+label')
     fig.update_layout(margin=dict(l=10, r=10, t=40, b=10))
     return fig
+
+def crear_grafico_temporal_votos(df, generos_top):
+    if 'release_year' not in df.columns or 'vote_count' not in df.columns or 'genres' not in df.columns:
+        return None, pd.DataFrame()
+        
+    df_temp = df.dropna(subset=['genres', 'vote_count', 'release_year']).copy()
+    df_temp['genres'] = df_temp['genres'].astype(str).str.split(',')
+    df_temp = df_temp.explode('genres')
+    df_temp['genres'] = df_temp['genres'].str.strip()
+    
+    df_temp = df_temp[df_temp['genres'].isin(generos_top)]
+    
+    df_agrupado = df_temp.groupby(['release_year', 'genres'])['vote_count'].mean().reset_index()
+    df_agrupado.rename(columns={'vote_count': 'Promedio de Votos', 'release_year': 'Año'}, inplace=True)
+    
+    fig = px.line(
+        df_agrupado,
+        x='Año',
+        y='Promedio de Votos',
+        color='genres',
+        title="Evolucion Temporal: Promedio de Votos por Genero",
+        labels={'genres': 'Genero'},
+        color_discrete_sequence=px.colors.qualitative.Pastel,
+        markers=True
+    )
+    
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=10, r=10, t=40, b=10),
+        hovermode="x unified"
+    )
+    
+    return fig, df_agrupado
 
 def obtener_mas_votado(df, columna, min_apariciones=2):
     df_temp = df.dropna(subset=[columna, 'vote_count', 'title']).copy()
@@ -118,41 +150,21 @@ def mostrar():
     except FileNotFoundError:
         st.error("No se encontraron los archivos de datos.")
         st.stop()
+        
+    # --- FILTRO GLOBAL ---
+    if 'filtro_anios' in st.session_state:
+        min_y, max_y = st.session_state['filtro_anios']
+        
+        if 'release_year' in df_pelis.columns:
+            df_pelis['release_year'] = pd.to_numeric(df_pelis['release_year'], errors='coerce')
+            df_pelis = df_pelis[(df_pelis['release_year'] >= min_y) & (df_pelis['release_year'] <= max_y)]
+            
+        if 'release_year' in df_series.columns:
+            df_series['release_year'] = pd.to_numeric(df_series['release_year'], errors='coerce')
+            df_series = df_series[(df_series['release_year'] >= min_y) & (df_series['release_year'] <= max_y)]
 
-    # --- SECCION DE GRAFICOS CIRCULARES ---
-    st.subheader("Distribucion General de Votos por Genero")
-    col_pie1, col_pie2 = st.columns(2)
-    
-    with col_pie1:
-        fig_pie_pelis = crear_pie_chart_generos_votos(df_pelis, "Votos por Genero en Peliculas")
-        if fig_pie_pelis:
-            st.plotly_chart(fig_pie_pelis, use_container_width=True, key="pie_votos_gen_pelis")
-            if st.button("Agregar Grafico de Peliculas al Informe", key="btn_add_pie_votos_gen_pelis"):
-                st.session_state['cuaderno_items']['pie_votos_gen_pelis'] = {
-                    'tipo': 'grafico',
-                    'titulo': 'Distribucion de Votos por Genero - Peliculas',
-                    'figura': fig_pie_pelis,
-                    'contenido': "Grafico circular de interacciones de los 4 generos principales en Peliculas."
-                }
-                st.toast("Grafico agregado al informe")
-
-    with col_pie2:
-        fig_pie_series = crear_pie_chart_generos_votos(df_series, "Votos por Genero en Series")
-        if fig_pie_series:
-            st.plotly_chart(fig_pie_series, use_container_width=True, key="pie_votos_gen_series")
-            if st.button("Agregar Grafico de Series al Informe", key="btn_add_pie_votos_gen_series"):
-                st.session_state['cuaderno_items']['pie_votos_gen_series'] = {
-                    'tipo': 'grafico',
-                    'titulo': 'Distribucion de Votos por Genero - Series',
-                    'figura': fig_pie_series,
-                    'contenido': "Grafico circular de interacciones de los 4 generos principales en Series."
-                }
-                st.toast("Grafico agregado al informe")
-
-    st.markdown("---")
-
-    # --- SECCION DE BARRAS INTERACTIVO ---
-    st.subheader("Analisis Detallado de Interacciones")
+    # --- CONTROLES DE ANALISIS DETALLADO ---
+    st.markdown("### Controles de Analisis")
     tipo_bd = st.selectbox("Selecciona la base de datos:", ["Películas", "Series"], key="bd_generos_int")
 
     df = df_pelis if tipo_bd == "Películas" else df_series
@@ -161,10 +173,8 @@ def mostrar():
         st.error("Faltan columnas necesarias (genres o vote_count).")
         st.stop()
 
-    # Calculamos el total de votos del catálogo antes de filtrar
     total_votos_catalogo = df['vote_count'].sum() if 'vote_count' in df.columns else 1
 
-    # Pre-procesamiento de la columna de géneros
     df_exp = df.dropna(subset=['genres', 'vote_count']).copy()
     df_exp['genres'] = df_exp['genres'].astype(str).str.split(',')
     df_exp = df_exp.explode('genres')
@@ -172,98 +182,159 @@ def mostrar():
     df_exp = df_exp[df_exp['genres'].str.lower() != 'unknown']
 
     lista_generos = sorted(df_exp['genres'].unique())
-    
-    # Obtener los 3 generos mas votados por defecto
-    top_3_generos = df_exp.groupby('genres')['vote_count'].sum().sort_values(ascending=False).head(3).index.tolist()
+    top_5_generos = df_exp.groupby('genres')['vote_count'].sum().sort_values(ascending=False).head(5).index.tolist()
 
     generos_seleccionados = st.multiselect(
         "Agrega los generos que deseas comparar:",
         options=lista_generos,
-        default=top_3_generos,
+        default=top_5_generos,
         key="generos_int_multiselect"
     )
     
     if not generos_seleccionados:
-        st.warning("Selecciona al menos un genero para visualizar la grafica.")
+        st.warning("Selecciona al menos un genero para visualizar las graficas detalladas.")
         return
-
-    df_filtrado = df_exp[df_exp['genres'].isin(generos_seleccionados)]
-    agrupado_generos = df_filtrado.groupby('genres').agg(
-        total_votos=('vote_count', 'sum'),
-        conteo_producciones=('title', 'nunique')
-    ).reset_index()
-
-    # Calculamos el porcentaje basado en el TOTAL del catálogo de votos
-    agrupado_generos['porcentaje_total'] = (agrupado_generos['total_votos'] / total_votos_catalogo) * 100
-    agrupado_generos['% del Total'] = agrupado_generos['porcentaje_total'].apply(lambda x: f"{x:.2f}%")
-
-    agrupado_generos = agrupado_generos.sort_values(by='total_votos', ascending=False)
-
-    fig_bar = px.bar(
-        agrupado_generos,
-        x='genres',
-        y='total_votos',
-        color='total_votos',
-        color_continuous_scale='Purp',
-        labels={
-            'genres': 'Genero', 
-            'total_votos': 'Total de Votos',
-            'conteo_producciones': 'Volumen de Datos'
-        },
-        title="Interacciones Totales por Genero",
-        hover_data={'conteo_producciones': True, '% del Total': True} 
-    )
-    
-    fig_bar.update_layout(
-        xaxis={'categoryorder': 'total descending'},
-        template='plotly_white',
-        margin=dict(l=10, r=10, t=40, b=10),
-        clickmode='event+select',
-        coloraxis_showscale=False
-    )
-    
-    fig_bar.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
-
-    if "estado_genero_int" not in st.session_state:
-        st.session_state.estado_genero_int = None
-
-    # RENDERIZAR GRAFICO INTERACTIVO
-    event_generos = st.plotly_chart(
-        fig_bar,
-        use_container_width=True,
-        on_select="rerun",
-        selection_mode="points",
-        key="grafico_generos_int_interactivo"
-    )
-    
-    if st.button("Agregar Grafico de Barras al Informe", key="btn_add_graf_generos_votos"):
-        st.session_state['cuaderno_items']['graf_generos_votos'] = {
-            'tipo': 'grafico',
-            'titulo': f'Interacciones Totales por Genero ({tipo_bd})',
-            'figura': fig_bar,
-            'contenido': "Grafico exportado de Interacciones por Genero"
-        }
-        st.toast("Grafico agregado al informe")
-    
-    # TABLA DE DATOS EN DESPLEGABLE
-    with st.expander("Ver tabla de datos", expanded=False):
-        df_generos_limpio = agrupado_generos.drop(columns=['porcentaje_total'])
-        st.dataframe(df_generos_limpio, use_container_width=True)
-        
-        if st.button("Agregar Tabla de Generos al Informe", key="btn_add_tabla_generos_votos"):
-            contenido_texto = []
-            for _, row in df_generos_limpio.iterrows():
-                contenido_texto.append(f"Genero {row['genres']}: Total Votos = {row['total_votos']:,.0f}, Obras = {row['conteo_producciones']}, Representa = {row['% del Total']}")
-                
-            st.session_state['cuaderno_items']['tabla_generos_votos'] = {
-                'tipo': 'tabla',
-                'titulo': f'Datos de Interacciones por Genero ({tipo_bd})',
-                'contenido': df_generos_limpio
-            }
-            st.toast("Tabla agregada al reporte")
 
     st.markdown("---")
 
+    # --- SEGMENTO 1: GRAFICOS CIRCULARES ---
+    with st.expander("1. Distribucion General de Votos (Circulares)", expanded=False):
+        col_pie1, col_pie2 = st.columns(2)
+        
+        with col_pie1:
+            fig_pie_pelis = crear_pie_chart_generos_votos(df_pelis, "Votos por Genero en Peliculas")
+            if fig_pie_pelis:
+                st.plotly_chart(fig_pie_pelis, use_container_width=True, key="pie_votos_gen_pelis")
+                if st.button("Agregar Grafico (Peliculas) al Informe", key="btn_add_pie_votos_gen_pelis"):
+                    rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                    st.session_state['cuaderno_items'][f'pie_votos_gen_pelis-{rango_actual}'] = {
+                        'tipo': 'grafico',
+                        'titulo': 'Distribucion de Votos por Genero - Peliculas',
+                        'figura': fig_pie_pelis,
+                        'contenido': "Grafico circular de interacciones de los 4 generos principales en Peliculas.",
+                        'rango_anios': rango_actual
+                    }
+                    st.toast("Grafico agregado al informe")
+
+        with col_pie2:
+            fig_pie_series = crear_pie_chart_generos_votos(df_series, "Votos por Genero en Series")
+            if fig_pie_series:
+                st.plotly_chart(fig_pie_series, use_container_width=True, key="pie_votos_gen_series")
+                if st.button("Agregar Grafico (Series) al Informe", key="btn_add_pie_votos_gen_series"):
+                    rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                    st.session_state['cuaderno_items'][f'pie_votos_gen_series-{rango_actual}'] = {
+                        'tipo': 'grafico',
+                        'titulo': 'Distribucion de Votos por Genero - Series',
+                        'figura': fig_pie_series,
+                        'contenido': "Grafico circular de interacciones de los 4 generos principales en Series.",
+                        'rango_anios': rango_actual
+                    }
+                    st.toast("Grafico agregado al informe")
+
+    # --- SEGMENTO 2: GRAFICO DE BARRAS ---
+    with st.expander("2. Analisis Detallado de Interacciones (Barras)", expanded=True):
+        df_filtrado = df_exp[df_exp['genres'].isin(generos_seleccionados)]
+        agrupado_generos = df_filtrado.groupby('genres').agg(
+            total_votos=('vote_count', 'sum'),
+            conteo_producciones=('title', 'nunique')
+        ).reset_index()
+
+        agrupado_generos['porcentaje_total'] = (agrupado_generos['total_votos'] / total_votos_catalogo) * 100
+        agrupado_generos['% del Total'] = agrupado_generos['porcentaje_total'].apply(lambda x: f"{x:.2f}%")
+        agrupado_generos = agrupado_generos.sort_values(by='total_votos', ascending=False)
+
+        fig_bar = px.bar(
+            agrupado_generos,
+            x='genres',
+            y='total_votos',
+            color='total_votos',
+            color_continuous_scale='Purp',
+            labels={'genres': 'Genero', 'total_votos': 'Total de Votos', 'conteo_producciones': 'Volumen de Datos'},
+            title="Interacciones Totales por Genero",
+            hover_data={'conteo_producciones': True, '% del Total': True} 
+        )
+        
+        fig_bar.update_layout(
+            xaxis={'categoryorder': 'total descending'},
+            template='plotly_white',
+            margin=dict(l=10, r=10, t=40, b=10),
+            clickmode='event+select',
+            coloraxis_showscale=False
+        )
+        fig_bar.update_traces(texttemplate='%{y:,.0f}', textposition='outside')
+
+        event_generos = st.plotly_chart(
+            fig_bar,
+            use_container_width=True,
+            on_select="rerun",
+            selection_mode="points",
+            key="grafico_generos_int_interactivo"
+        )
+        
+        if st.button("Agregar Grafico de Barras al Informe", key="btn_add_graf_generos_votos"):
+            rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+            st.session_state['cuaderno_items'][f'graf_generos_votos-{rango_actual}'] = {
+                'tipo': 'grafico',
+                'titulo': f'Interacciones Totales por Genero ({tipo_bd})',
+                'figura': fig_bar,
+                'contenido': "Grafico exportado de Interacciones por Genero",
+                'rango_anios': rango_actual
+            }
+            st.toast("Grafico agregado al informe")
+        
+        # Toggle para mostrar la tabla dentro de este segmento
+        if st.toggle("Mostrar tabla de datos de barras", key="tgl_tabla_barras"):
+            df_generos_limpio = agrupado_generos.drop(columns=['porcentaje_total'])
+            st.dataframe(df_generos_limpio, use_container_width=True)
+            
+            if st.button("Agregar Tabla de Generos al Informe", key="btn_add_tabla_generos_votos"):
+                rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                st.session_state['cuaderno_items'][f'tabla_generos_votos-{rango_actual}'] = {
+                    'tipo': 'tabla',
+                    'titulo': f'Datos de Interacciones por Genero ({tipo_bd})',
+                    'contenido': df_generos_limpio,
+                    'rango_anios': rango_actual
+                }
+                st.toast("Tabla agregada al reporte")
+
+    # --- SEGMENTO 3: GRAFICO TEMPORAL ---
+    with st.expander("3. Evolucion de Votos Promedio (Lineas)", expanded=True):
+        fig_line, df_temp_agrupado = crear_grafico_temporal_votos(df, generos_seleccionados)
+        
+        if fig_line is not None and not df_temp_agrupado.empty:
+            st.plotly_chart(fig_line, use_container_width=True, key="line_votos_temporal")
+            
+            if st.button("Agregar Grafico Temporal al Informe", key="btn_add_line_temporal_votos"):
+                rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                st.session_state['cuaderno_items'][f'line_temporal_votos-{rango_actual}'] = {
+                    'tipo': 'grafico',
+                    'titulo': f'Evolucion de Promedio de Votos por Genero ({tipo_bd})',
+                    'figura': fig_line,
+                    'contenido': "Grafico de linea temporal mostrando el promedio de votos por año de los generos seleccionados.",
+                    'rango_anios': rango_actual
+                }
+                st.toast("Grafico agregado al informe")
+                
+            # Toggle para mostrar la tabla dentro de este segmento
+            if st.toggle("Mostrar datos temporales", key="tgl_tabla_temporal"):
+                df_pivot = df_temp_agrupado.pivot(index='Año', columns='genres', values='Promedio de Votos').reset_index().round(1)
+                df_pivot = df_pivot.fillna(0)
+                st.dataframe(df_pivot, use_container_width=True)
+                
+                if st.button("Agregar Tabla Temporal al Informe", key="btn_add_tabla_temporal_votos"):
+                    rango_actual = f"{st.session_state['filtro_anios'][0]} - {st.session_state['filtro_anios'][1]}" if 'filtro_anios' in st.session_state else "Historico Completo"
+                    st.session_state['cuaderno_items'][f'tabla_temporal_votos-{rango_actual}'] = {
+                        'tipo': 'tabla',
+                        'titulo': f'Historico de Promedio de Votos por Genero ({tipo_bd})',
+                        'contenido': df_pivot,
+                        'rango_anios': rango_actual
+                    }
+                    st.toast("Tabla agregada al reporte")
+
+    # Dialogo de seleccion
+    if "estado_genero_int" not in st.session_state:
+        st.session_state.estado_genero_int = None
+        
     sel_genero = event_generos.selection["points"][0]["x"] if event_generos and event_generos.selection.get("points") else None
     nuevo_genero = sel_genero if sel_genero != st.session_state.estado_genero_int else None
     st.session_state.estado_genero_int = sel_genero
