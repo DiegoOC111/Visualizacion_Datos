@@ -4,7 +4,7 @@ import plotly.express as px
 
 @st.cache_data
 def cargar_datos(tipo_bd):
-    if tipo_bd == "Películas":
+    if tipo_bd == "Peliculas":
         return pd.read_csv("Datos/peliculas.csv")
     else:
         return pd.read_csv("Datos/series.csv")
@@ -34,10 +34,8 @@ def top_por_popularidad_por_idioma(df, columna_objetivo, columna_idioma=None, id
     )
     agrupado = agrupado[agrupado['cantidad_apariciones'] >= min_apariciones]
     
-    # NUEVO: Calculamos porcentaje de participación para el tooltip
     total_apariciones = agrupado['cantidad_apariciones'].sum()
     agrupado['porcentaje_total'] = (agrupado['cantidad_apariciones'] / total_apariciones) * 100
-    agrupado['% Participación'] = agrupado['porcentaje_total'].apply(lambda x: f"{x:.2f}%")
     
     return agrupado.sort_values(by='mediana_popularidad', ascending=False).head(top_n)
 
@@ -56,7 +54,7 @@ def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="
             'cantidad_apariciones': 'Obras'
         },
         title=titulo_grafico,
-        hover_data={'cantidad_apariciones': True, '% Participación': True} # NUEVO: Tooltip enriquecido
+        hover_data={'cantidad_apariciones': True}
     )
     
     fig.update_layout(
@@ -67,17 +65,16 @@ def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="
         clickmode='event+select'
     )
     
-    # Mejora visual: Agregamos el valor encima de las barras
     fig.update_traces(texttemplate='%{y:.1f}', textposition='outside')
     
     return fig
 
 @st.dialog("Mini-Resumen", width="large")
 def popup_detalles(seleccion, df_actual):
-    st.markdown(f"### 👤 {seleccion}")
+    st.markdown(f"### {seleccion}")
     nombre_url = seleccion.replace(' ', '_')
     url_wiki = f"https://es.wikipedia.org/wiki/{nombre_url}"
-    st.info(f"[Haz clic aquí para abrir la Wikipedia de {seleccion}]({url_wiki})")
+    st.info(f"[Haz clic aqui para abrir la Wikipedia de {seleccion}]({url_wiki})")
     
     mask_cast = df_actual['cast'].fillna('').str.contains(seleccion, case=False, regex=False) if 'cast' in df_actual.columns else False
     mask_dir = df_actual['director'].fillna('').str.contains(seleccion, case=False, regex=False) if 'director' in df_actual.columns else False
@@ -87,7 +84,7 @@ def popup_detalles(seleccion, df_actual):
     if not df_persona.empty:
         titulos_lista = ", ".join(df_persona['title'].astype(str).tolist())
         
-        with st.expander(f"🎬 Producciones encontradas ({len(df_persona)})", expanded=True):
+        with st.expander(f"Producciones encontradas ({len(df_persona)})", expanded=True):
             st.write(titulos_lista)
         
         st.write("") 
@@ -109,32 +106,32 @@ def popup_detalles(seleccion, df_actual):
         c1, c2, c3 = st.columns(3)
         
         with c1:
-            st.markdown("**Más Popular**")
+            st.markdown("**Mas Popular**")
             st.markdown(f"##### {mas_popular['title']}")
-            st.success(f"↑ {mas_popular['popularity']:.1f} pop")
+            st.success(f" {mas_popular['popularity']:.1f} pop")
             
         with c2:
             st.markdown("**Menos Popular**")
             st.markdown(f"##### {menos_popular['title']}")
-            st.error(f"↓ {menos_popular['popularity']:.1f} pop")
+            st.error(f" {menos_popular['popularity']:.1f} pop")
             
         with c3:
-            st.markdown("**Más Reciente**")
+            st.markdown("**Mas Reciente**")
             st.markdown(f"##### {mas_reciente_titulo}")
             st.info(f"Año: {fecha_str}")
 
 def mostrar():
-    st.title("🎬 Dashboard de Popularidad: Actores y Directores")
+    st.title("Dashboard de Popularidad: Actores y Directores")
 
-    tipo_bd = st.selectbox("Selecciona la base de datos a analizar:", ["Películas", "Series"])
+    tipo_bd = st.selectbox("Selecciona la base de datos a analizar:", ["Peliculas", "Series"])
 
     try:
         df_actual = cargar_datos(tipo_bd)
     except FileNotFoundError:
-        st.error(f"No se encontró el archivo respectivo para {tipo_bd}.")
+        st.error(f"No se encontro el archivo respectivo para {tipo_bd}.")
         st.stop()
 
-    st.sidebar.header("Filtros de Búsqueda")
+    st.sidebar.header("Filtros de Busqueda")
     
     if 'language' in df_actual.columns:
         lista_idiomas = sorted(df_actual['language'].dropna().astype(str).str.strip().unique())
@@ -147,7 +144,7 @@ def mostrar():
         default=["en"] if "en" in lista_idiomas else None
     )
 
-    min_apariciones = st.sidebar.slider("Apariciones mínimas (Rango: 1 - 10):", min_value=1, max_value=10, value=8)
+    min_apariciones = st.sidebar.slider("Apariciones minimas (Rango: 1 - 10):", min_value=1, max_value=10, value=8)
 
     st.markdown("---")
 
@@ -157,12 +154,14 @@ def mostrar():
         st.session_state.estado_directores = None
 
     if not idiomas_seleccionados:
-        st.warning("👈 Por favor, selecciona al menos un idioma en la barra lateral para ver los resultados.")
+        st.warning("Por favor, selecciona al menos un idioma en la barra lateral para ver los resultados.")
     else:
         col1, col2 = st.columns(2)
         
         event_actores = None
         event_directores = None
+        top_actores = pd.DataFrame()
+        top_directores = pd.DataFrame()
 
         with col1:
             st.subheader("Top 5 Actores")
@@ -171,13 +170,9 @@ def mostrar():
                     df_actual, 'cast', 'language', idiomas_seleccionados, min_apariciones, 5
                 )
                 if not top_actores.empty:
-                    # Ocultamos la columna técnica de porcentaje en el dataframe
-                    st.dataframe(top_actores.drop(columns=['porcentaje_total']), use_container_width=True)
-                    
                     fig_actores = crear_grafico_degrade(
                         top_actores, 'cast', 'Popularidad de Actores', paleta_color='Tealgrn'
                     )
-                    
                     event_actores = st.plotly_chart(
                         fig_actores, 
                         use_container_width=True, 
@@ -185,6 +180,26 @@ def mostrar():
                         selection_mode="points",
                         key="grafico_actores"
                     )
+                    
+                    if st.button("Agregar Grafico de Actores al Informe", key="btn_add_graf_actores"):
+                        st.session_state['cuaderno_items']['graf_actores_pop'] = {
+                            'tipo': 'grafico',
+                            'titulo': f'Top 5 Actores por Popularidad ({tipo_bd})',
+                            'figura': fig_actores,
+                            'contenido': "Grafico exportado de Top Actores"
+                        }
+                        st.toast("Grafico agregado al reporte")
+                    
+                    with st.expander("Ver tabla de datos", expanded=False):
+                        df_actores_limpio = top_actores.drop(columns=['porcentaje_total'])
+                        st.dataframe(df_actores_limpio, use_container_width=True)
+                        if st.button("Agregar Tabla Actores al Informe", key="btn_add_tabla_actores"):
+                             st.session_state['cuaderno_items']['tabla_actores_pop'] = {
+                                'tipo': 'tabla',
+                                'titulo': f'Datos Top 5 Actores por Popularidad ({tipo_bd})',
+                                'contenido': df_actores_limpio
+                            }
+                             st.toast("Tabla agregada al reporte")
                 else:
                     st.info("Sin resultados.")
             else:
@@ -197,13 +212,9 @@ def mostrar():
                     df_actual, 'director', 'language', idiomas_seleccionados, min_apariciones, 5
                 )
                 if not top_directores.empty:
-                    # Ocultamos la columna técnica de porcentaje en el dataframe
-                    st.dataframe(top_directores.drop(columns=['porcentaje_total']), use_container_width=True)
-                    
                     fig_directores = crear_grafico_degrade(
                         top_directores, 'director', 'Popularidad de Directores', paleta_color='Sunset'
                     )
-                    
                     event_directores = st.plotly_chart(
                         fig_directores, 
                         use_container_width=True, 
@@ -211,6 +222,26 @@ def mostrar():
                         selection_mode="points",
                         key="grafico_directores"
                     )
+                    
+                    if st.button("Agregar Grafico de Directores al Informe", key="btn_add_graf_directores"):
+                        st.session_state['cuaderno_items']['graf_directores_pop'] = {
+                            'tipo': 'grafico',
+                            'titulo': f'Top 5 Directores por Popularidad ({tipo_bd})',
+                            'figura': fig_directores,
+                            'contenido': "Grafico exportado de Top Directores"
+                        }
+                        st.toast("Grafico agregado al reporte")
+                    
+                    with st.expander("Ver tabla de datos", expanded=False):
+                        df_directores_limpio = top_directores.drop(columns=['porcentaje_total'])
+                        st.dataframe(df_directores_limpio, use_container_width=True)
+                        if st.button("Agregar Tabla Directores al Informe", key="btn_add_tabla_directores"):
+                             st.session_state['cuaderno_items']['tabla_directores_pop'] = {
+                                'tipo': 'tabla',
+                                'titulo': f'Datos Top 5 Directores por Popularidad ({tipo_bd})',
+                                'contenido': df_directores_limpio
+                            }
+                             st.toast("Tabla agregada al reporte")
                 else:
                     st.info("Sin resultados.")
             else:
