@@ -5,8 +5,9 @@ import tempfile
 import os
 import gc
 import subprocess
+import plotly.io as pio
 
-
+pio.kaleido.scope.executable_path = "/usr/bin/chromium"
 
 def limpiar_texto(texto):
     if texto is None:
