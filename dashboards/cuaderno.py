@@ -4,6 +4,19 @@ from fpdf import FPDF
 import tempfile
 import os
 import gc
+import subprocess
+
+# --- INSTALACIÓN AUTOMÁTICA DE CHROME EN EL SERVIDOR ---
+@st.cache_resource
+def preparar_motor_grafico():
+    """Ejecuta el comando de terminal que exige Kaleido para descargar Chrome en la nube"""
+    try:
+        subprocess.run(["plotly_get_chrome"], capture_output=True)
+    except:
+        pass
+
+preparar_motor_grafico()
+# -------------------------------------------------------
 
 def limpiar_texto(texto):
     if texto is None:
@@ -72,8 +85,6 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
                         temp_filename = tmpfile.name
                     
-                    # CORRECCIÓN: Se eliminó el parámetro engine='kaleido' 
-                    # Plotly usará Kaleido automáticamente por defecto.
                     item['figura'].write_image(temp_filename, format='png', width=800, height=450)
                     
                     if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
@@ -85,22 +96,13 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                         
                 except Exception as e:
                     pdf.set_font("Arial", 'I', 9)
-                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor. Detalles: {str(e)[:100]})"))
+                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor: {str(e)[:100]})"))
                 finally:
                     if temp_filename and os.path.exists(temp_filename):
                         try:
                             os.remove(temp_filename)
                         except:
                             pass
-                
-                contenido_desc = item.get('contenido')
-                if isinstance(contenido_desc, str):
-                    pdf.set_font("Arial", 'I', 9)
-                    pdf.multi_cell(190, 6, limpiar_texto(f"Detalle: {contenido_desc}"))
-                elif isinstance(contenido_desc, list):
-                    pdf.set_font("Arial", 'I', 9)
-                    for linea in contenido_desc:
-                        pdf.multi_cell(190, 6, limpiar_texto(f"Detalle: {linea}"))
                 
                 contenido_desc = item.get('contenido')
                 if isinstance(contenido_desc, str):
@@ -126,7 +128,6 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
         pdf.set_font("Arial", '', 11)
         pdf.multi_cell(190, 8, limpiar_texto(conclusion))
         
-    # Usar un archivo temporal fijo que no se borre hasta que inicie un nuevo ciclo
     temp_pdf_path = os.path.join(tempfile.gettempdir(), "informe_temporal_app.pdf")
     
     try:
@@ -231,7 +232,6 @@ def mostrar():
             if 'ruta_pdf_listo' in st.session_state and st.session_state['ruta_pdf_listo'] is not None:
                 st.success("Documento preparado exitosamente.")
                 
-                # Leer bytes en tiempo real justo cuando el boton se renderiza
                 try:
                     with open(st.session_state['ruta_pdf_listo'], "rb") as pdf_file:
                         PDFbyte = pdf_file.read()
