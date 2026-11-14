@@ -1,6 +1,6 @@
 streamlit
 pandas
 plotly
-fpdf
-kaleido
+fpdf2
+kaleido==0.2.1
 chromium
