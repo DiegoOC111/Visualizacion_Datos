@@ -3,6 +3,7 @@ import pandas as pd
 from fpdf import FPDF
 import tempfile
 import os
+import gc
 
 def limpiar_texto(texto):
     if texto is None:
@@ -13,7 +14,6 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
     pdf = FPDF()
     pdf.add_page()
     
-    # Titulo principal
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(190, 10, limpiar_texto(titulo), ln=True, align='C')
     pdf.ln(10)
@@ -23,23 +23,19 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
         pdf.cell(190, 8, limpiar_texto("No se seleccionaron datos."), ln=True)
     else:
         for item in elementos_seleccionados:
-            # 1. Titulo original del elemento guardado
             pdf.set_font("Arial", 'B', 12)
-            pdf.multi_cell(190, 8, limpiar_texto(item['titulo']))
+            pdf.multi_cell(190, 8, limpiar_texto(item.get('titulo', 'Sin titulo')))
             
-            # 2. Periodo de tiempo analizado
             rango_str = item.get('rango_anios', 'Historico Completo')
             pdf.set_font("Arial", 'I', 10)
             pdf.cell(190, 6, limpiar_texto(f"Periodo analizado: {rango_str}"), ln=True)
             pdf.ln(2)
             
-            # 3. Texto Antes (Tipo Titulo secundario)
             if item.get('texto_antes'):
                 pdf.set_font("Arial", 'B', 11)
                 pdf.multi_cell(190, 6, limpiar_texto(item['texto_antes']))
                 pdf.ln(2)
             
-            # 4. Renderizado del contenido real (Tabla, KPI, Grafico)
             pdf.set_font("Arial", '', 10)
             if item['tipo'] == 'texto':
                 for linea in item['contenido']:
@@ -73,14 +69,11 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
             elif item['tipo'] == 'grafico':
                 temp_filename = None
                 try:
-                    # Crear archivo temporal
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
                         temp_filename = tmpfile.name
                     
-                    # Exportar imagen con dimensiones fijas para evitar errores de memoria en la nube
-                    item['figura'].write_image(temp_filename, format='png', width=800, height=450)
+                    item['figura'].write_image(temp_filename, format='png', width=800, height=450, engine='kaleido')
                     
-                    # Verificar que el archivo realmente tenga peso antes de incrustarlo
                     if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
                         pdf.image(temp_filename, w=180)
                         pdf.ln(2)
@@ -90,12 +83,14 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                         
                 except Exception as e:
                     pdf.set_font("Arial", 'I', 9)
-                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor: {str(e)})"))
+                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor: Asegurate de tener kaleido instalado. Detalles: {str(e)[:100]})"))
                 finally:
                     if temp_filename and os.path.exists(temp_filename):
-                        os.remove(temp_filename)
+                        try:
+                            os.remove(temp_filename)
+                        except:
+                            pass
                 
-                # Agregar el texto descriptivo si existe
                 contenido_desc = item.get('contenido')
                 if isinstance(contenido_desc, str):
                     pdf.set_font("Arial", 'I', 9)
@@ -107,14 +102,12 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                     
             pdf.ln(3)
             
-            # 5. Texto Despues (Tipo Normal explicativo)
             if item.get('texto_despues'):
                 pdf.set_font("Arial", '', 11)
                 pdf.multi_cell(190, 6, limpiar_texto(item['texto_despues']))
                 
             pdf.ln(8)
             
-    # Conclusion Final
     if conclusion:
         pdf.ln(5)
         pdf.set_font("Arial", 'B', 12)
@@ -122,7 +115,6 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
         pdf.set_font("Arial", '', 11)
         pdf.multi_cell(190, 8, limpiar_texto(conclusion))
         
-    # Manejo compatible tanto para fpdf antiguo como para fpdf2
     try:
         salida = pdf.output()
         if isinstance(salida, str):
@@ -134,7 +126,6 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
             return salida.encode('latin-1')
         return bytes(salida)
 
-
 def mostrar():
     st.title("Constructor de Informe Final")
     
@@ -142,7 +133,6 @@ def mostrar():
         st.info("Tu cuaderno esta vacio. Navega por los reportes en la barra lateral y agrega graficos, KPIs o tablas.")
         return
 
-    # Sincronizacion del orden
     if 'orden_cuaderno' not in st.session_state:
         st.session_state['orden_cuaderno'] = list(st.session_state['cuaderno_items'].keys())
     else:
@@ -168,7 +158,7 @@ def mostrar():
             item = st.session_state['cuaderno_items'][key]
             rango_item = item.get('rango_anios', 'Historico')
             
-            with st.expander(f"{item['titulo']} ({rango_item})", expanded=False):
+            with st.expander(f"{item.get('titulo', 'Sin Titulo')} ({rango_item})", expanded=False):
                 c_check, c_up, c_down, c_del = st.columns([4, 1.5, 1.5, 1.5])
                 with c_check:
                     incluido = item.get('incluido', True)
@@ -180,20 +170,20 @@ def mostrar():
                 with c_up:
                     if st.button("Subir", key=f"up_{key}", disabled=(i == 0), use_container_width=True):
                         orden_actual[i], orden_actual[i-1] = orden_actual[i-1], orden_actual[i]
-                        st.session_state.pop('pdf_generado', None)
+                        st.session_state.pop('pdf_bytes_listo', None)
                         st.rerun()
                         
                 with c_down:
                     if st.button("Bajar", key=f"down_{key}", disabled=(i == len(orden_actual)-1), use_container_width=True):
                         orden_actual[i], orden_actual[i+1] = orden_actual[i+1], orden_actual[i]
-                        st.session_state.pop('pdf_generado', None)
+                        st.session_state.pop('pdf_bytes_listo', None)
                         st.rerun()
                         
                 with c_del:
                     if st.button("Quitar", key=f"del_{key}", type="primary", use_container_width=True):
                         del st.session_state['cuaderno_items'][key]
                         orden_actual.remove(key)
-                        st.session_state.pop('pdf_generado', None)
+                        st.session_state.pop('pdf_bytes_listo', None)
                         st.rerun()
                 
                 st.markdown("---")
@@ -207,7 +197,7 @@ def mostrar():
         if st.button("Limpiar Cuaderno (Borrar Todo)"):
             st.session_state['cuaderno_items'] = {}
             st.session_state['orden_cuaderno'] = []
-            st.session_state.pop('pdf_generado', None)
+            st.session_state.pop('pdf_bytes_listo', None)
             st.rerun()
 
         st.markdown("### 2. Analisis Final")
@@ -217,17 +207,19 @@ def mostrar():
         st.markdown("### 3. Exportar")
         
         if len(elementos_finales) > 0:
-            # Boton 1: Construye el PDF bajo demanda y lo guarda en memoria
-            if st.button("1. Preparar Documento PDF", use_container_width=True):
-                with st.spinner("Renderizando graficos y compilando PDF..."):
-                    st.session_state['pdf_generado'] = generar_pdf(titulo_reporte, elementos_finales, conclusion)
-                st.success("Documento listo para descargar.")
-            
-            # Boton 2: Aparece solo cuando los bytes del PDF ya existen y son validos
-            if 'pdf_generado' in st.session_state and st.session_state['pdf_generado']:
+            if st.button("1. Preparar Documento PDF", use_container_width=True, type="secondary"):
+                with st.spinner("Compilando graficos y construyendo el PDF... esto toma unos segundos."):
+                    try:
+                        bytes_generados = generar_pdf(titulo_reporte, elementos_finales, conclusion)
+                        st.session_state['pdf_bytes_listo'] = bytes_generados
+                    except Exception as e:
+                        st.error(f"Ocurrio un error al generar el documento: {str(e)}")
+                        
+            if 'pdf_bytes_listo' in st.session_state and st.session_state['pdf_bytes_listo'] is not None:
+                st.success("Documento preparado exitosamente.")
                 st.download_button(
                     label="2. Descargar Informe en PDF",
-                    data=st.session_state['pdf_generado'],
+                    data=st.session_state['pdf_bytes_listo'],
                     file_name="informe_analisis.pdf",
                     mime="application/pdf",
                     type="primary",
@@ -235,6 +227,7 @@ def mostrar():
                 )
         else:
             st.warning("Selecciona al menos un elemento para habilitar la exportacion.")
+            st.session_state.pop('pdf_bytes_listo', None)
 
     with col_preview:
         st.subheader("Vista Previa del Informe")
@@ -242,7 +235,7 @@ def mostrar():
         st.markdown("---")
         
         for item in elementos_finales:
-            st.markdown(f"#### {item['titulo']}")
+            st.markdown(f"#### {item.get('titulo', 'Sin Titulo')}")
             
             rango_str = item.get('rango_anios', 'Historico Completo')
             st.caption(f"**Periodo analizado:** {rango_str}")
@@ -268,7 +261,10 @@ def mostrar():
                 st.dataframe(item['contenido'], use_container_width=True)
                 
             elif item['tipo'] == 'grafico':
-                st.plotly_chart(item['figura'], use_container_width=True)
+                if 'figura' in item and item['figura'] is not None:
+                    st.plotly_chart(item['figura'], use_container_width=True)
+                else:
+                    st.warning("El grafico guardado esta corrupto o no se encontro la figura.")
             
             if item.get('texto_despues'):
                 st.write(item['texto_despues'])
@@ -279,3 +275,5 @@ def mostrar():
         if conclusion:
             st.markdown("#### Conclusion Final")
             st.write(conclusion)
+            
+        gc.collect()
