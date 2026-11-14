@@ -5,11 +5,39 @@ import tempfile
 import os
 import gc
 
-# --- CONFIGURACIÓN PARA EL NUEVO KALEIDO (VERSIÓN 0.4+) ---
-# Le decimos exactamente a la nueva versión dónde encontrar el motor gráfico en el servidor Linux
-os.environ["CHROME_PATH"] = "/usr/bin/chromium"
-os.environ["CHROMIUM_PATH"] = "/usr/bin/chromium"
-# ----------------------------------------------------------
+# --- TRUCO DEFINITIVO PARA ENGAÑAR A KALEIDO EN STREAMLIT CLOUD ---
+# Creamos accesos directos con los nombres exactos que Kaleido exige
+def parchear_kaleido():
+    try:
+        local_bin = os.path.join(tempfile.gettempdir(), "kaleido_bins")
+        os.makedirs(local_bin, exist_ok=True)
+        
+        # Buscamos dónde instaló Linux el motor desde packages.txt
+        rutas_posibles_linux = ["/usr/bin/chromium", "/usr/bin/chromium-browser"]
+        ruta_real = None
+        for ruta in rutas_posibles_linux:
+            if os.path.exists(ruta):
+                ruta_real = ruta
+                break
+                
+        if ruta_real:
+            fake_chrome1 = os.path.join(local_bin, "google-chrome")
+            fake_chrome2 = os.path.join(local_bin, "chrome")
+            
+            # Crear los accesos directos
+            if not os.path.exists(fake_chrome1):
+                os.symlink(ruta_real, fake_chrome1)
+            if not os.path.exists(fake_chrome2):
+                os.symlink(ruta_real, fake_chrome2)
+                
+            # Engañar al sistema añadiendo esta carpeta a las rutas de búsqueda
+            if local_bin not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = f"{local_bin}:{os.environ.get('PATH', '')}"
+    except Exception:
+        pass
+
+parchear_kaleido()
+# ------------------------------------------------------------------
 
 def limpiar_texto(texto):
     if texto is None:
@@ -78,7 +106,7 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
                         temp_filename = tmpfile.name
                     
-                    # Generar la imagen (Plotly encontrará el motor gracias a os.environ)
+                    # Generar la imagen. El PATH engañado guiará a Kaleido hacia Chromium
                     item['figura'].write_image(temp_filename, format='png', width=800, height=450)
                     
                     if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
