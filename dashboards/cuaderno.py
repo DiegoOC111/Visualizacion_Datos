@@ -6,17 +6,7 @@ import os
 import gc
 import subprocess
 
-# --- INSTALACIÓN AUTOMÁTICA DE CHROME EN EL SERVIDOR ---
-@st.cache_resource
-def preparar_motor_grafico():
-    """Ejecuta el comando de terminal que exige Kaleido para descargar Chrome en la nube"""
-    try:
-        subprocess.run(["plotly_get_chrome"], capture_output=True)
-    except:
-        pass
 
-preparar_motor_grafico()
-# -------------------------------------------------------
 
 def limpiar_texto(texto):
     if texto is None:
