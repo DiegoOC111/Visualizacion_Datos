@@ -4,10 +4,6 @@ from fpdf import FPDF
 import tempfile
 import os
 import gc
-import subprocess
-import plotly.io as pio
-
-pio.kaleido.scope.executable_path = "/usr/bin/chromium"
 
 def limpiar_texto(texto):
     if texto is None:
@@ -76,7 +72,15 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
                         temp_filename = tmpfile.name
                     
-                    item['figura'].write_image(temp_filename, format='png', width=800, height=450)
+                    # --- SOLUCIÓN DIRECTA Y SEGURA PARA STREAMLIT CLOUD ---
+                    from kaleido.scopes.plotly import PlotlyScope
+                    # Instanciamos el motor forzando la ruta al Chromium del sistema
+                    scope = PlotlyScope(executable_path="/usr/bin/chromium")
+                    
+                    # Transformamos el grafico interactivo a bytes de imagen estática
+                    imagen_bytes = scope.transform(item['figura'], format='png', width=800, height=450)
+                    with open(temp_filename, "wb") as f:
+                        f.write(imagen_bytes)
                     
                     if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
                         pdf.image(temp_filename, w=180)
@@ -87,7 +91,7 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                         
                 except Exception as e:
                     pdf.set_font("Arial", 'I', 9)
-                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor: {str(e)[:100]})"))
+                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor. Detalles: {str(e)[:100]})"))
                 finally:
                     if temp_filename and os.path.exists(temp_filename):
                         try:
