@@ -5,6 +5,12 @@ import tempfile
 import os
 import gc
 
+# --- CONFIGURACIÓN PARA EL NUEVO KALEIDO (VERSIÓN 0.4+) ---
+# Le decimos exactamente a la nueva versión dónde encontrar el motor gráfico en el servidor Linux
+os.environ["CHROME_PATH"] = "/usr/bin/chromium"
+os.environ["CHROMIUM_PATH"] = "/usr/bin/chromium"
+# ----------------------------------------------------------
+
 def limpiar_texto(texto):
     if texto is None:
         return ""
@@ -72,15 +78,8 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
                         temp_filename = tmpfile.name
                     
-                    # --- SOLUCIÓN DIRECTA Y SEGURA PARA STREAMLIT CLOUD ---
-                    from kaleido.scopes.plotly import PlotlyScope
-                    # Instanciamos el motor forzando la ruta al Chromium del sistema
-                    scope = PlotlyScope(executable_path="/usr/bin/chromium")
-                    
-                    # Transformamos el grafico interactivo a bytes de imagen estática
-                    imagen_bytes = scope.transform(item['figura'], format='png', width=800, height=450)
-                    with open(temp_filename, "wb") as f:
-                        f.write(imagen_bytes)
+                    # Generar la imagen (Plotly encontrará el motor gracias a os.environ)
+                    item['figura'].write_image(temp_filename, format='png', width=800, height=450)
                     
                     if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
                         pdf.image(temp_filename, w=180)
