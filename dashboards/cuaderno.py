@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 
 def generar_informe_html(titulo, elementos_seleccionados, conclusion):
-    # Cabecera HTML y estilos CSS integrados para un diseño limpio y formal
     html = f"""
     <!DOCTYPE html>
     <html lang="es">
@@ -10,11 +9,17 @@ def generar_informe_html(titulo, elementos_seleccionados, conclusion):
         <meta charset="utf-8">
         <title>{titulo}</title>
         <style>
+            /* --- ESTILOS ESPECIALES PARA CUANDO SE CONVIERTE A PDF --- */
+            @media print {{
+                .no-print {{ display: none !important; }}
+                body {{ padding: 0; background: white; }}
+                .grafico-container, .conclusion-box {{ page-break-inside: avoid; }}
+            }}
+            /* --------------------------------------------------------- */
+            
             body {{ font-family: 'Segoe UI', Arial, sans-serif; max-width: 900px; margin: auto; padding: 40px; color: #333; }}
             h1 {{ text-align: center; color: #2c3e50; font-size: 28px; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
             h2 {{ color: #2980b9; margin-top: 30px; font-size: 20px; }}
-            h3 {{ color: #34495e; font-size: 16px; margin-bottom: 5px; }}
-            p {{ line-height: 1.6; font-size: 15px; }}
             .rango {{ font-style: italic; color: #7f8c8d; font-size: 14px; margin-top: -15px; margin-bottom: 15px; display: block; }}
             table {{ width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; }}
             th, td {{ border: 1px solid #bdc3c7; padding: 10px; text-align: left; }}
@@ -22,9 +27,19 @@ def generar_informe_html(titulo, elementos_seleccionados, conclusion):
             .grafico-container {{ margin: 25px 0; border: 1px solid #ecf0f1; border-radius: 5px; padding: 10px; }}
             .conclusion-box {{ background-color: #f8f9fa; border-left: 4px solid #27ae60; padding: 15px; margin-top: 30px; }}
             hr {{ border: 0; border-top: 1px solid #ecf0f1; margin: 30px 0; }}
+            
+            .btn-imprimir {{
+                position: fixed; top: 20px; right: 20px; background-color: #e74c3c; color: white;
+                border: none; padding: 12px 24px; border-radius: 5px; font-weight: bold; font-size: 14px;
+                cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.2); transition: 0.3s;
+            }}
+            .btn-imprimir:hover {{ background-color: #c0392b; }}
         </style>
     </head>
     <body>
+        <!-- Este botón desaparecerá al guardarse el PDF -->
+        <button class="btn-imprimir no-print" onclick="window.print()"> Descargar como PDF</button>
+        
         <h1>{titulo}</h1>
     """
     
@@ -39,14 +54,12 @@ def generar_informe_html(titulo, elementos_seleccionados, conclusion):
             if item.get('texto_antes'):
                 html += f"<p><strong>{item['texto_antes']}</strong></p>"
                 
-            # Procesar Listas de Texto
             if item['tipo'] == 'texto':
                 html += "<ul>"
                 for linea in item['contenido']:
                     html += f"<li>{linea}</li>"
                 html += "</ul>"
                 
-            # Procesar KPIs
             elif item['tipo'] == 'kpi':
                 html += "<ul>"
                 if isinstance(item['contenido'], dict):
@@ -57,16 +70,13 @@ def generar_informe_html(titulo, elementos_seleccionados, conclusion):
                         html += f"<li>{linea}</li>"
                 html += "</ul>"
                 
-            # Procesar Tablas de Pandas
             elif item['tipo'] == 'tabla':
                 df = item['contenido']
-                # Convierte el DataFrame a tabla HTML nativa
                 html += df.to_html(index=False, classes="table", border=0, justify="left")
                 
-            # Procesar Gráficos de Plotly de forma nativa (CERO dependencias)
             elif item['tipo'] == 'grafico':
                 if 'figura' in item and item['figura'] is not None:
-                    # include_plotlyjs='cdn' inserta la librería web para que el gráfico sea interactivo offline
+                    # Plotly genera el script web internamente
                     fig_html = item['figura'].to_html(full_html=False, include_plotlyjs='cdn')
                     html += f"<div class='grafico-container'>{fig_html}</div>"
                     
@@ -90,15 +100,27 @@ def generar_informe_html(titulo, elementos_seleccionados, conclusion):
         html += f"<p>{conclusion}</p>"
         html += "</div>"
         
-    html += "</body></html>"
+    html += """
+        <script>
+            // MAGIA: Cuando el usuario abre el archivo, espera 1.5 seg (para que cargue el gráfico)
+            // y automáticamente abre la ventana de 'Guardar como PDF'.
+            window.onload = function() {
+                setTimeout(function() {
+                    window.print();
+                }, 1500);
+            };
+        </script>
+    </body></html>
+    """
     
     return html.encode('utf-8')
+
 
 def mostrar():
     st.title("Constructor de Informe Final")
     
     if 'cuaderno_items' not in st.session_state or len(st.session_state['cuaderno_items']) == 0:
-        st.info("Tu cuaderno está vacío. Navega por los reportes en la barra lateral y agrega gráficos, KPIs o tablas.")
+        st.info("Tu cuaderno está vacío. Navega por los reportes en la barra lateral y agrega gráficos o tablas.")
         return
 
     if 'orden_cuaderno' not in st.session_state:
@@ -109,7 +131,7 @@ def mostrar():
                 st.session_state['orden_cuaderno'].append(k)
         st.session_state['orden_cuaderno'] = [k for k in st.session_state['orden_cuaderno'] if k in st.session_state['cuaderno_items']]
 
-    st.write("Selecciona, ordena y personaliza los elementos guardados que deseas incluir en tu informe interactivo.")
+    st.write("Selecciona y personaliza los elementos guardados que deseas exportar.")
     
     col_config, col_preview = st.columns([1.2, 1.5])
     
@@ -175,8 +197,8 @@ def mostrar():
         st.markdown("### 3. Exportar Informe")
         
         if len(elementos_finales) > 0:
-            if st.button("Generar Informe Web", use_container_width=True, type="secondary"):
-                with st.spinner("Compilando código web y gráficos nativos..."):
+            if st.button("Preparar Documento (Auto-PDF)", use_container_width=True, type="secondary"):
+                with st.spinner("Compilando código web y gráficos..."):
                     html_bytes = generar_informe_html(titulo_reporte, elementos_finales, conclusion)
                     st.session_state['html_bytes_listo'] = html_bytes
                         
@@ -184,13 +206,14 @@ def mostrar():
                 st.success("Documento preparado exitosamente.")
                 
                 st.download_button(
-                    label="Descargar Informe Interactivo (HTML)",
+                    label="Descargar Archivo",
                     data=st.session_state['html_bytes_listo'],
-                    file_name="informe_analisis_interactivo.html",
+                    file_name="informe_analisis.html",
                     mime="text/html",
                     type="primary",
                     use_container_width=True
                 )
+                st.caption("💡 *Abre el archivo descargado y se guardará como PDF automáticamente.*")
         else:
             st.warning("Selecciona al menos un elemento para habilitar la exportación.")
             st.session_state.pop('html_bytes_listo', None)
