@@ -273,7 +273,31 @@ def mostrar():
             st.markdown("---")
             
         if conclusion:
-            st.markdown("#### Conclusion Final")
-            st.write(conclusion)
+                    st.ln(5)
+                    st.set_font("Arial", 'B', 12)
+                    st.cell(190, 10, limpiar_texto("Interpretacion / Conclusion Final:"), ln=True)
+                    st.set_font("Arial", '', 11)
+                    st.multi_cell(190, 8, limpiar_texto(conclusion))
+                    
+                # --- SOLUCION DEFINITIVA PARA LOS 0 BYTES EN LA NUBE ---
+                # Guardamos el PDF en un archivo físico temporal, extraemos los bytes puros y lo borramos
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+                    temp_pdf_path = tmp_pdf.name
+        try:
+                # Exportar a disco (funciona en todas las versiones de fpdf)
+                    st.output(temp_pdf_path)
+                    
+                    # Leer los bytes absolutos del archivo generado
+                    with open(temp_pdf_path, "rb") as f:
+                        pdf_bytes = f.read()
+                        
+                    return pdf_bytes
+                
+        except Exception as e:
+            raise Exception(f"Fallo al escribir el PDF temporal: {str(e)}")
+        finally:
+                        # Limpiar el servidor
+            if os.path.exists(temp_pdf_path):
+                 os.remove(temp_pdf_path)
             
         gc.collect()
