@@ -115,16 +115,18 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
         pdf.set_font("Arial", '', 11)
         pdf.multi_cell(190, 8, limpiar_texto(conclusion))
         
+    # Usar un archivo temporal fijo que no se borre hasta que inicie un nuevo ciclo
+    temp_pdf_path = os.path.join(tempfile.gettempdir(), "informe_temporal_app.pdf")
+    
     try:
-        salida = pdf.output()
-        if isinstance(salida, str):
-            return salida.encode('latin-1')
-        return bytes(salida)
-    except TypeError:
-        salida = pdf.output(dest='S')
-        if isinstance(salida, str):
-            return salida.encode('latin-1')
-        return bytes(salida)
+        if os.path.exists(temp_pdf_path):
+            os.remove(temp_pdf_path)
+            
+        pdf.output(temp_pdf_path)
+        return temp_pdf_path
+        
+    except Exception as e:
+        raise Exception(f"Fallo al escribir el PDF temporal: {str(e)}")
 
 def mostrar():
     st.title("Constructor de Informe Final")
@@ -146,7 +148,7 @@ def mostrar():
     col_config, col_preview = st.columns([1.2, 1.5])
     
     with col_config:
-        st.subheader("1. Configuracion")
+        st.subheader("Configuracion")
         titulo_reporte = st.text_input("Titulo del Informe", value="Reporte Ejecutivo")
         
         st.markdown("**Orden y Personalizacion:**")
@@ -170,20 +172,20 @@ def mostrar():
                 with c_up:
                     if st.button("Subir", key=f"up_{key}", disabled=(i == 0), use_container_width=True):
                         orden_actual[i], orden_actual[i-1] = orden_actual[i-1], orden_actual[i]
-                        st.session_state.pop('pdf_bytes_listo', None)
+                        st.session_state.pop('ruta_pdf_listo', None)
                         st.rerun()
                         
                 with c_down:
                     if st.button("Bajar", key=f"down_{key}", disabled=(i == len(orden_actual)-1), use_container_width=True):
                         orden_actual[i], orden_actual[i+1] = orden_actual[i+1], orden_actual[i]
-                        st.session_state.pop('pdf_bytes_listo', None)
+                        st.session_state.pop('ruta_pdf_listo', None)
                         st.rerun()
                         
                 with c_del:
                     if st.button("Quitar", key=f"del_{key}", type="primary", use_container_width=True):
                         del st.session_state['cuaderno_items'][key]
                         orden_actual.remove(key)
-                        st.session_state.pop('pdf_bytes_listo', None)
+                        st.session_state.pop('ruta_pdf_listo', None)
                         st.rerun()
                 
                 st.markdown("---")
@@ -197,7 +199,7 @@ def mostrar():
         if st.button("Limpiar Cuaderno (Borrar Todo)"):
             st.session_state['cuaderno_items'] = {}
             st.session_state['orden_cuaderno'] = []
-            st.session_state.pop('pdf_bytes_listo', None)
+            st.session_state.pop('ruta_pdf_listo', None)
             st.rerun()
 
         st.markdown("### 2. Analisis Final")
@@ -207,27 +209,36 @@ def mostrar():
         st.markdown("### 3. Exportar")
         
         if len(elementos_finales) > 0:
-            if st.button("1. Preparar Documento PDF", use_container_width=True, type="secondary"):
+            if st.button("Preparar Documento PDF", use_container_width=True, type="secondary"):
                 with st.spinner("Compilando graficos y construyendo el PDF... esto toma unos segundos."):
                     try:
-                        bytes_generados = generar_pdf(titulo_reporte, elementos_finales, conclusion)
-                        st.session_state['pdf_bytes_listo'] = bytes_generados
+                        ruta_pdf = generar_pdf(titulo_reporte, elementos_finales, conclusion)
+                        st.session_state['ruta_pdf_listo'] = ruta_pdf
                     except Exception as e:
                         st.error(f"Ocurrio un error al generar el documento: {str(e)}")
                         
-            if 'pdf_bytes_listo' in st.session_state and st.session_state['pdf_bytes_listo'] is not None:
+            if 'ruta_pdf_listo' in st.session_state and st.session_state['ruta_pdf_listo'] is not None:
                 st.success("Documento preparado exitosamente.")
-                st.download_button(
-                    label="2. Descargar Informe en PDF",
-                    data=st.session_state['pdf_bytes_listo'],
-                    file_name="informe_analisis.pdf",
-                    mime="application/pdf",
-                    type="primary",
-                    use_container_width=True
-                )
+                
+                # Leer bytes en tiempo real justo cuando el boton se renderiza
+                try:
+                    with open(st.session_state['ruta_pdf_listo'], "rb") as pdf_file:
+                        PDFbyte = pdf_file.read()
+
+                    st.download_button(
+                        label="Descargar Informe en PDF",
+                        data=PDFbyte,
+                        file_name="informe_analisis.pdf",
+                        mime="application/pdf",
+                        type="primary",
+                        use_container_width=True
+                    )
+                except FileNotFoundError:
+                    st.error("El archivo temporal expiro. Por favor, vuelve a presionar 'Preparar Documento PDF'.")
+                    st.session_state.pop('ruta_pdf_listo', None)
         else:
             st.warning("Selecciona al menos un elemento para habilitar la exportacion.")
-            st.session_state.pop('pdf_bytes_listo', None)
+            st.session_state.pop('ruta_pdf_listo', None)
 
     with col_preview:
         st.subheader("Vista Previa del Informe")
@@ -273,31 +284,7 @@ def mostrar():
             st.markdown("---")
             
         if conclusion:
-                    st.ln(5)
-                    st.set_font("Arial", 'B', 12)
-                    st.cell(190, 10, limpiar_texto("Interpretacion / Conclusion Final:"), ln=True)
-                    st.set_font("Arial", '', 11)
-                    st.multi_cell(190, 8, limpiar_texto(conclusion))
-                    
-                # --- SOLUCION DEFINITIVA PARA LOS 0 BYTES EN LA NUBE ---
-                # Guardamos el PDF en un archivo físico temporal, extraemos los bytes puros y lo borramos
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-                    temp_pdf_path = tmp_pdf.name
-        try:
-                # Exportar a disco (funciona en todas las versiones de fpdf)
-                    st.output(temp_pdf_path)
-                    
-                    # Leer los bytes absolutos del archivo generado
-                    with open(temp_pdf_path, "rb") as f:
-                        pdf_bytes = f.read()
-                        
-                    return pdf_bytes
-                
-        except Exception as e:
-            raise Exception(f"Fallo al escribir el PDF temporal: {str(e)}")
-        finally:
-                        # Limpiar el servidor
-            if os.path.exists(temp_pdf_path):
-                 os.remove(temp_pdf_path)
+            st.markdown("#### Conclusion Final")
+            st.write(conclusion)
             
         gc.collect()
