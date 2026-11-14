@@ -72,7 +72,9 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
                         temp_filename = tmpfile.name
                     
-                    item['figura'].write_image(temp_filename, format='png', width=800, height=450, engine='kaleido')
+                    # CORRECCIÓN: Se eliminó el parámetro engine='kaleido' 
+                    # Plotly usará Kaleido automáticamente por defecto.
+                    item['figura'].write_image(temp_filename, format='png', width=800, height=450)
                     
                     if os.path.exists(temp_filename) and os.path.getsize(temp_filename) > 0:
                         pdf.image(temp_filename, w=180)
@@ -83,13 +85,22 @@ def generar_pdf(titulo, elementos_seleccionados, conclusion):
                         
                 except Exception as e:
                     pdf.set_font("Arial", 'I', 9)
-                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor: Asegurate de tener kaleido instalado. Detalles: {str(e)[:100]})"))
+                    pdf.multi_cell(190, 6, limpiar_texto(f"(Error al renderizar grafico en el servidor. Detalles: {str(e)[:100]})"))
                 finally:
                     if temp_filename and os.path.exists(temp_filename):
                         try:
                             os.remove(temp_filename)
                         except:
                             pass
+                
+                contenido_desc = item.get('contenido')
+                if isinstance(contenido_desc, str):
+                    pdf.set_font("Arial", 'I', 9)
+                    pdf.multi_cell(190, 6, limpiar_texto(f"Detalle: {contenido_desc}"))
+                elif isinstance(contenido_desc, list):
+                    pdf.set_font("Arial", 'I', 9)
+                    for linea in contenido_desc:
+                        pdf.multi_cell(190, 6, limpiar_texto(f"Detalle: {linea}"))
                 
                 contenido_desc = item.get('contenido')
                 if isinstance(contenido_desc, str):
