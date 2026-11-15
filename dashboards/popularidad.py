@@ -46,8 +46,8 @@ def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="
         df_plot,
         x=columna_nombre,
         y='mediana_popularidad',
-        color='mediana_popularidad',
-        color_continuous_scale=paleta_color,
+
+
         labels={
             columna_nombre: columna_nombre.capitalize(),
             'mediana_popularidad': 'Pop. Mediana',
@@ -56,7 +56,7 @@ def crear_grafico_degrade(df_top, columna_nombre, titulo_grafico, paleta_color="
         title=titulo_grafico,
         hover_data={'cantidad_apariciones': True}
     )
-    
+    fig.update_traces(marker_color='#3498db')
     fig.update_layout(
         xaxis={'categoryorder': 'total descending'},
         coloraxis_showscale=False,
@@ -89,13 +89,12 @@ def crear_grafico_temporal_popularidad(df, columna_objetivo, talentos_top):
         df_agrupado,
         x='Año',
         y='Promedio de Popularidad',
-        color=columna_objetivo,
+
         title=titulo,
         labels={columna_objetivo: columna_objetivo.capitalize()},
-        color_discrete_sequence=px.colors.qualitative.Pastel,
         markers=True
     )
-    
+    fig.update_traces(marker_color='#3498db')
     fig.update_layout(
         template='plotly_white',
         margin=dict(l=10, r=10, t=40, b=10),
