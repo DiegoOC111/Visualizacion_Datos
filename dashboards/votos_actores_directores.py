@@ -89,13 +89,13 @@ def crear_grafico_temporal_talento(df, columna_objetivo, talentos_top):
         df_agrupado,
         x='Año',
         y='Promedio de Votos',
-
+        color=columna_objetivo,
         title=titulo,
         labels={columna_objetivo: columna_objetivo.capitalize()},
-
+        color_discrete_sequence=px.colors.qualitative.Pastel,
         markers=True
     )
-    fig.update_traces(marker_color='#3498db')
+    
     fig.update_layout(
         template='plotly_white',
         margin=dict(l=10, r=10, t=40, b=10),

@@ -63,13 +63,13 @@ def crear_grafico_temporal_popularidad_generos(df, generos_top):
         df_agrupado,
         x='Año',
         y='Promedio de Popularidad',
-
+        color='genres',
         title="Evolucion Temporal: Popularidad Mediana por Genero",
         labels={'genres': 'Genero'},
-
+        color_discrete_sequence=px.colors.qualitative.Pastel,
         markers=True
     )
-    fig.update_traces(marker_color='#3498db')
+    
     fig.update_layout(
         template='plotly_white',
         margin=dict(l=10, r=10, t=40, b=10),
