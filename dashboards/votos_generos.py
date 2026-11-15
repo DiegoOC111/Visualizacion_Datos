@@ -247,13 +247,12 @@ def mostrar():
             agrupado_generos,
             x='genres',
             y='total_votos',
-            color='total_votos',
-            color_continuous_scale='Purp',
             labels={'genres': 'Genero', 'total_votos': 'Total de Votos', 'conteo_producciones': 'Volumen de Datos'},
             title="Interacciones Totales por Genero",
             hover_data={'conteo_producciones': True, '% del Total': True} 
         )
-        
+        fig_bar.update_traces(marker_color='#3498db')
+
         fig_bar.update_layout(
             xaxis={'categoryorder': 'total descending'},
             template='plotly_white',
